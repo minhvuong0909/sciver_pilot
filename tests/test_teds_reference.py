@@ -80,3 +80,8 @@ def test_numbers_and_multiset_pr():
     e = rec("<table><tr><td>1</td><td>2</td><td>3</td></tr></table>", cond="E1")
     p, r = numeric_precision_recall(e, g)
     assert (p, r) == (pytest.approx(2 / 3), pytest.approx(2 / 3))
+
+
+def test_numbers_in_script_notation():
+    assert numbers_in_text("78.9_{1.2}") == ["78.9", "1.2"]
+    assert numbers_in_text("10^{-3}") == ["10", "-3"]

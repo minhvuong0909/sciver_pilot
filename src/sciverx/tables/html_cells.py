@@ -58,6 +58,20 @@ def cell_text(tag: Tag) -> str:
     # chỉ <br> và khối (p, div) mới tách từ.
     for br in tag.find_all("br"):
         br.replace_with(" ")
+    # Chỉ số dưới/trên: "78.9<sub>1.2</sub>" (độ lệch chuẩn) → "78.9_{1.2}" thay vì dính
+    # thành "78.91.2"; chỉ số trên chỉ gồm ký hiệu chú thích (*, †...) vẫn nối liền.
+    for el in reversed(tag.find_all(["sub", "sup", "msub", "msup"])):
+        if el.name in ("msub", "msup"):
+            kids = [k for k in el.children if isinstance(k, Tag)]
+            if len(kids) == 2:
+                base, script = kids[0].get_text(""), kids[1].get_text("").strip()
+                mark = "_" if el.name == "msub" else "^"
+                el.replace_with(f"{base}{mark}{{{script}}}" if script else base)
+            continue
+        inner = el.get_text("").strip()
+        if not inner or (el.name == "sup" and all(ch in FOOTNOTE_CHARS for ch in inner)):
+            continue
+        el.replace_with(f"{'_' if el.name == 'sub' else '^'}{{{inner}}}")
     for block in tag.find_all(lambda e: e.name in ("p", "div", "li", "tr", "td", "th")
                               or {"ltx_tr", "ltx_td", "ltx_p"} & set(e.get("class") or [])):
         block.insert_after(" ")

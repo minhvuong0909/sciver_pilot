@@ -144,3 +144,12 @@ def test_guess_header_rows_when_not_declared():
     assert n_header == 1
     numeric_first = "<table><tr><td>a</td><td>1</td></tr><tr><td>b</td><td>2</td></tr></table>"
     assert parse_html_table(numeric_first)[1] == 0
+
+
+def test_sub_and_sup_scripts_are_kept_apart():
+    html = ("<table><tr><td>78.9<sub class='ltx_sub'>1.2</sub></td><td>92.4<sup>*</sup></td>"
+            "<td>10<sup>-3</sup></td><td><math><msub><mn>51.9</mn><mn>0.2</mn></msub>"
+            "<annotation>51.9_{0.2}</annotation></math></td></tr></table>")
+    cells, _ = parse_html_table(html)
+    assert [c.text_raw for c in cells] == ["78.9_{1.2}", "92.4*", "10^{-3}", "51.9_{0.2}"]
+    assert cells[1].footnote_marks == ["*"]

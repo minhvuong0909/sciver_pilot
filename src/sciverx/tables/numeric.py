@@ -9,7 +9,8 @@ from decimal import Decimal, InvalidOperation
 from sciverx.schemas import TableRecord
 
 # Số có dấu, phần nghìn đã bỏ ở bước chuẩn hóa; giữ dạng thập phân.
-_NUM = re.compile(r"(?<![\w.])[-+]?\d+(?:\.\d+)?(?!\w|\.\d)")
+# "_" và "^" (ký hiệu chỉ số "78.9_{1.2}", "10^{-3}") không coi là dính chữ.
+_NUM = re.compile(r"(?<![A-Za-z0-9.])[-+]?\d+(?:\.\d+)?(?![A-Za-z0-9]|\.\d)")
 
 
 def canonical_number(text: str) -> str | None:
