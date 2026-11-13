@@ -140,6 +140,7 @@ Ví dụ sai: `update`, `fix bug`, `WIP`, `sửa lại code m3 cho chạy đư�
 | `verifier` | `verifier/` — prompt, dựng đầu vào, vLLM, chấm điểm |
 | `eval` | `evaluation/` — chỉ số, thống kê, báo cáo |
 | `annotation` | `annotation/` — xuất/nhập nhãn, độ đồng thuận |
+| `utils` | `utils/` — JSONL, hash, run_id, manifest, seed, logging |
 | `configs` | `configs/` |
 | `spec` | `SPEC_SciVer_TableVerify.md` |
 | `readme` | `README.md` |
