@@ -28,7 +28,7 @@ def _text(c: SourceCell) -> str:
 
 def _keys(grid: Grid, cell: SourceCell, col_headers: list[str], n_header: int) -> set[tuple[str, str]]:
     """Các khóa (tiêu đề hàng, tiêu đề cột) mà ô phủ. Ô tiêu đề và cột tiêu đề hàng không có khóa."""
-    if cell.is_header or cell.row < n_header:
+    if cell.row < n_header:
         return set()
     keys = set()
     for r in range(cell.row, cell.row + cell.rowspan):
@@ -77,8 +77,11 @@ def map_cells(e: TableRecord, g: TableRecord, min_content_sim: float = 0.8) -> C
         if c.cell_id in used_e:
             continue
         best = None
+        # So theo vùng (hàng tiêu đề / thân bảng), không theo cờ is_header: Docling đánh
+        # cột tên hàng là <th> còn bảng chuẩn thì không.
+        e_head = c.row < e.n_header_rows
         for gc in g.cells:
-            if gc.cell_id in used_g or gc.is_header != c.is_header:
+            if gc.cell_id in used_g or (gc.row < g.n_header_rows) != e_head:
                 continue
             if not order_ok(c.row, gc.row):
                 continue

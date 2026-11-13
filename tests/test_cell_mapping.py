@@ -79,3 +79,12 @@ def test_map_e_cells_to_g():
     m = map_cells(e, G)
     g_ids, missing = map_e_cells_to_g(m, ["r2c1", "r9c9"])
     assert g_ids == {"r2c1", "r2c2"} and missing == ["r9c9"]
+
+
+def test_row_header_column_matched_even_if_only_e_marks_it_as_header():
+    # Docling đánh cột tên hàng là <th>, bảng chuẩn dùng <td>
+    e = rec("<tr><th>BERT</th><td>84.1</td><td>90.9</td></tr>"
+            "<tr><th>Ours</th><td>86.0</td><td>92.4</td></tr>", "E1")
+    m = map_cells(e, G)
+    assert pairs(m)["r1c0"][0] == ["r1c0"] and pairs(m)["r2c0"][0] == ["r2c0"]
+    assert m.unmatched_g == []
