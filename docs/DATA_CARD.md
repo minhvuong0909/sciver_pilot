@@ -19,13 +19,14 @@
 | Bảng chuẩn G0 `ok` | 1.307 |
 | Bảng loại khỏi G0 | 20 `gold_unavailable` (bảng là ảnh hoặc HTML rỗng) |
 | **PAIRED_RETR** (mọi bảng của bài có G ok) | **271** |
-| **PAIRED_ORACLE** (bảng bằng chứng có G ok và có E) | chưa tính — cần E0 từ Docling |
+| Bảng trích E0 `ok` (Docling trên PDF arXiv) | 1.244 (83 `no_table_found`) |
+| **PAIRED_ORACLE** (bảng bằng chứng có G ok và có E) | **287** |
 
 Sau khi lọc, nhãn không còn 50/50: 140 Entailed / 151 Refuted.
 
-## Ảnh bảng
+## Ảnh bảng và E0
 
-Theo quyết định của nhóm (2026-11-13): chỉ dùng ảnh có sẵn trong dataset. Dataset chỉ có ảnh cho một phần bảng; bảng không có ảnh được giữ trong kho E dưới dạng `no_table_found` (`image_missing`) để G và E có cùng danh sách nguồn. Lấy ảnh/PDF cho các bảng này để làm sau.
+Dataset có đủ ảnh cho 315 bảng làm bằng chứng của 291 claim (dùng cho điều kiện IMG), nhưng chỉ 379/1.327 bảng của 213 bài có ảnh. Vì vậy (quyết định của nhóm, 2026-11-13) E0 được trích bằng Docling từ **PDF arXiv đúng phiên bản** của bài, cho mọi bảng trong kho. Bảng Docling không tìm thấy vẫn nằm trong kho E với `status=no_table_found` để G và E có cùng danh sách nguồn.
 
 ## Test
 
