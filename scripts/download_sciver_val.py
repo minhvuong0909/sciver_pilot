@@ -51,7 +51,9 @@ def rel_from_dataset_path(p: str) -> str:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default="data/raw/SciVer")
-    ap.add_argument("--images", action="store_true")
+    ap.add_argument("--images", action="store_true", help="ảnh bằng chứng của các claim validation")
+    ap.add_argument("--table-images", action="store_true",
+                    help="ảnh của mọi bảng trong các bài validation, nếu dataset có")
     args = ap.parse_args()
     root = Path(args.root)
     if not fetch("valset.json", root / "valset.json"):
@@ -68,6 +70,17 @@ def main() -> None:
                     imgs.add(rel_from_dataset_path(r[k]))
         miss_img = [p for p in sorted(imgs) if not fetch(p, root / p)]
         print(f"images: {len(imgs) - len(miss_img)}/{len(imgs)} (thiếu {len(miss_img)})")
+    if args.table_images:
+        # Ảnh của MỌI bảng trong các bài validation mà dataset có (không chỉ ảnh bằng chứng),
+        # tên theo mẫu images/{paperid}-Table{N}-1.png; 404 nghĩa là dataset không có ảnh đó.
+        got = tried = 0
+        for p in papers:
+            paper = json.loads((root / p).read_text(encoding="utf-8"))
+            pid = Path(p).stem
+            for tid in paper.get("tables", {}):
+                tried += 1
+                got += fetch(f"images/{pid}-Table{tid}-1.png", root / "images" / f"{pid}-Table{tid}-1.png")
+        print(f"table images: {got}/{tried}")
 
 
 if __name__ == "__main__":
