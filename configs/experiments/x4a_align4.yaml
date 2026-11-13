@@ -1,0 +1,4 @@
+# X4a — RQ3: S-align4 (M3 + M4), unified_v1.
+base: ../base.yaml
+experiment: x4a_align4
+verifier: {setting: S-align4, system: P0, method: hybrid, table_conditions: [G1, E1]}

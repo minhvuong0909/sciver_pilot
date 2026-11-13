@@ -1,0 +1,4 @@
+# X4b — RQ3: S-align45 (M3 + M4 + M5), unified_v1_numeric.
+base: ../base.yaml
+experiment: x4b_align45
+verifier: {setting: S-align45, system: P0, method: hybrid, table_conditions: [G1, E1]}

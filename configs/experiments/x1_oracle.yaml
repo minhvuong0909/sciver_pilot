@@ -1,0 +1,4 @@
+# X1 — RQ1 (SPEC mục 9): S-oracle, prompt gốc SciVer, 5 dạng bảng, 4 lượt sinh.
+base: ../base.yaml
+experiment: x1_oracle
+verifier: {setting: S-oracle, system: P0, unified: false, table_conditions: [IMG, G0, G1, E0, E1]}

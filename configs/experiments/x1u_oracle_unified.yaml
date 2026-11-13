@@ -1,0 +1,4 @@
+# X1u — cầu nối prompt gốc ↔ unified_v1 ở S-oracle (cần duyệt unified_v1 trước, H5).
+base: ../base.yaml
+experiment: x1u_oracle_unified
+verifier: {setting: S-oracle, system: P0, unified: true, table_conditions: [IMG, G1, E1]}
