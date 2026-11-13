@@ -6,7 +6,7 @@ selection: {allow_mixed: false}
 m1:
   gold: {use_arxiv_html: true, version_policy: dataset_or_latest_before_collection, arxiv_sleep_s: 3,
          audit_random_n: 100, audit_score_threshold: 0.8}
-  docling: {mode: ACCURATE, do_ocr: true, do_cell_matching: false}
+  docling: {source: pdf, mode: ACCURATE, do_ocr: true, do_ocr_pdf: false, do_cell_matching: false}
   normalize: {format_dependent_terms: configs/format_terms.txt, include_bold: false}
   units: {max_wordpieces: 384, embed_model: sentence-transformers/all-mpnet-base-v2}
 m3: {methods: [bm25, dense, hybrid], bm25: {k1: 1.5, b: 0.75}, rrf_constant: 60, k_units: 50,

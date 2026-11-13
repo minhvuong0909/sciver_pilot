@@ -97,15 +97,89 @@ def extract_all(sources: list[dict], extractor: TableExtractor, data_root: str |
     return out
 
 
+def _record_from_html(paper_id: str, table_id: str, caption: str, name: str, html: str | None,
+                      quality: dict) -> TableRecord:
+    base = dict(table_record_id=TableRecord.make_id(paper_id, table_id, "E0"), paper_id=paper_id,
+                table_id=table_id, condition="E0", extractor=name, caption=caption)
+    if not html:
+        return TableRecord(**base, cells=[], n_header_rows=0, status="no_table_found", quality=quality)
+    try:
+        cells, n_header, _ = parse_table_html(html)
+        build_grid(cells)
+    except Exception as exc:
+        return TableRecord(**base, cells=[], n_header_rows=0, status="error",
+                           quality={**quality, "error": str(exc)[:200]})
+    cells = [c.model_copy(update={"bold": None}) for c in cells]
+    return TableRecord(**base, cells=cells, n_header_rows=n_header, status="ok", quality=quality)
+
+
+def extract_paper_from_pdf(src: dict, pdf: Path | None, finder, page_texts, cache_dir: Path,
+                           cfg_key: str = "") -> list[TableRecord]:
+    """E0 cho mọi bảng của một bài từ PDF. `page_texts(pdf) -> list[str]` (chữ từng trang)."""
+    from sciverx.m1_prepare.pdf_tables import (FoundTable, caption_pages, match_tables, page_groups,
+                                               table_labels)
+    tids = [t["table_id"] for t in src["tables"]]
+    caps = {t["table_id"]: t["caption"] for t in src["tables"]}
+    labels = table_labels(src["tables"])   # ID của dataset ≠ nhãn in trong PDF ("7" → "C.1")
+    if pdf is None or not pdf.exists():
+        return [_record_from_html(src["paper_id"], t, caps[t], finder.name, None,
+                                  {"source": "pdf", "reason": "pdf_missing"}) for t in tids]
+    key = sha256_obj({"pdf": sha256_bytes(pdf.read_bytes()), "ext": finder.name, "cfg": cfg_key,
+                      "labels": labels})
+    hit = cache_dir / f"{key}.json"
+    if hit.exists():
+        cached = json.loads(hit.read_text(encoding="utf-8"))
+        pages_of = cached["pages_of"]
+        found = [FoundTable(**f) for f in cached["found"]]
+    else:
+        pages_of = caption_pages(page_texts(pdf), list(labels.values()))
+        found = []
+        for rng in page_groups([p for ps in pages_of.values() for p in ps]):
+            found += finder.find(pdf, rng)
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        hit.write_text(json.dumps({"pages_of": pages_of, "found": [vars(f) for f in found]}), encoding="utf-8")
+    matched = match_tables(found, pages_of)
+    out = []
+    for t in tids:
+        lab = labels[t]
+        if lab in matched:
+            f, how = matched[lab]
+            q = {"source": "pdf", "page": f.page, "match": how, "label": lab}
+            out.append(_record_from_html(src["paper_id"], t, caps[t], finder.name, f.html, q))
+        else:
+            reason = "caption_not_found" if lab not in pages_of else "no_docling_table"
+            out.append(_record_from_html(src["paper_id"], t, caps[t], finder.name, None,
+                                         {"source": "pdf", "reason": reason}))
+    return out
+
+
 def run(cfg: dict, args) -> int:  # pragma: no cover - cần docling
     dcfg = cfg.get("m1", {}).get("docling", {})
-    extractor = DoclingExtractor(dcfg.get("mode", "ACCURATE"), dcfg.get("do_ocr", True),
-                                 dcfg.get("do_cell_matching", False))
-    recs = extract_all(read_jsonl(sources_path(cfg)), extractor, cfg["paths"]["data_root"],
-                       work_dir(cfg) / "cache" / "docling", sha256_obj(dcfg))
+    sources = read_jsonl(sources_path(cfg))
+    if cfg.get("limit"):
+        sources = sources[: cfg["limit"]]
+    if dcfg.get("source", "pdf") == "pdf":
+        from sciverx.m1_prepare.pdf_tables import DoclingPdfFinder, download_pdf, pdf_page_texts
+        finder = DoclingPdfFinder(dcfg.get("mode", "ACCURATE"), dcfg.get("do_ocr_pdf", False),
+                                  dcfg.get("do_cell_matching", False))
+        pdf_dir = Path(cfg["paths"]["data_root"]).parent / "arxiv_pdf"
+        recs = []
+        for i, src in enumerate(sources, 1):
+            pdf = download_pdf(src["paper_id"], pdf_dir, cfg["m1"]["gold"].get("arxiv_sleep_s", 3))
+            recs += extract_paper_from_pdf(src, pdf, finder, pdf_page_texts,
+                                           work_dir(cfg) / "cache" / "docling_pdf", sha256_obj(dcfg))
+            if i % 10 == 0:
+                print(f"[extract] {i}/{len(sources)} bài", flush=True)
+        name = finder.name
+    else:
+        extractor = DoclingExtractor(dcfg.get("mode", "ACCURATE"), dcfg.get("do_ocr", True),
+                                     dcfg.get("do_cell_matching", False))
+        recs = extract_all(sources, extractor, cfg["paths"]["data_root"],
+                           work_dir(cfg) / "cache" / "docling", sha256_obj(dcfg))
+        name = extractor.name
     write_jsonl(tables_path(cfg, "E0"), recs)
     by: dict[str, int] = {}
     for r in recs:
         by[r.status] = by.get(r.status, 0) + 1
-    print(f"[extract] {len(recs)} bảng E0 ({extractor.name}): {by}")
+    print(f"[extract] {len(recs)} bảng E0 ({name}): {by}")
     return 0
