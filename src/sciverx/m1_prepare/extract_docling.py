@@ -167,8 +167,10 @@ def run(cfg: dict, args) -> int:  # pragma: no cover - cần docling
         sources = sources[: cfg["limit"]]
     if dcfg.get("source", "pdf") == "pdf":
         from sciverx.m1_prepare.pdf_tables import DoclingPdfFinder, download_pdf, pdf_page_texts
+        # PDF có lớp chữ: bật cell matching để lấy chữ ô từ PDF (tắt thì ~20% bảng mất
+        # chữ ở hàng tiêu đề); nhánh ảnh vẫn tắt như SPEC.
         finder = DoclingPdfFinder(dcfg.get("mode", "ACCURATE"), dcfg.get("do_ocr_pdf", False),
-                                  dcfg.get("do_cell_matching", False))
+                                  dcfg.get("do_cell_matching_pdf", True))
         pdf_dir = Path(cfg["paths"]["data_root"]).parent / "arxiv_pdf"
         recs = []
         for i, src in enumerate(sources, 1):
