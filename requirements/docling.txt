@@ -1,0 +1,7 @@
+# Môi trường "docling" (Python 3.11): trích bảng từ ảnh — SPEC mục 3.2
+# Ghim phiên bản thật bằng `pip freeze > requirements/docling.lock.txt`.
+docling
+beautifulsoup4
+lxml
+pydantic>=2
+pyyaml
