@@ -18,9 +18,9 @@ venv/
 .env.*
 
 # Dữ liệu, model, đầu ra (SPEC mục 2.10)
-data/
-outputs/
-third_party/
+/data/
+/outputs/
+/third_party/
 *.npy
 *.npz
 *.pt
