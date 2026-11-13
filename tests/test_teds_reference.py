@@ -12,8 +12,8 @@ from sciverx.tables.numeric import numbers_in_text, numeric_precision_recall
 from sciverx.tables.teds import build_tree, normalized_levenshtein, teds, tree_size
 
 
-def rec(html, cond="G1"):
-    cells, n_header = parse_html_table(html)
+def rec(html, cond="G1", n_header=0):
+    cells, _ = parse_html_table(html)  # số hàng tiêu đề cố định để giữ giá trị tính tay
     return TableRecord(table_record_id=f"p::T::{cond}", paper_id="p", table_id="T", condition=cond,
                        extractor="test", caption="", cells=cells, n_header_rows=n_header,
                        status="ok")
@@ -54,7 +54,7 @@ def test_partial_content_cost():
 
 
 def test_header_section_is_structure():
-    a = rec("<table><thead><tr><th>h</th></tr></thead><tr><td>1</td></tr></table>")
+    a = rec("<table><thead><tr><th>h</th></tr></thead><tr><td>1</td></tr></table>", n_header=1)
     b = rec("<table><tr><td>h</td></tr><tr><td>1</td></tr></table>", cond="E1")
     # a: table, thead, tr, td, tbody, tr, td = 7; b: table, tbody, 2 tr, 2 td = 6
     # b → a: xóa tbody (2 tr lên làm con table), chèn thead bọc tr đầu, chèn tbody

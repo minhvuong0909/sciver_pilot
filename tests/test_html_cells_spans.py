@@ -98,3 +98,49 @@ def test_overlapping_cells_rejected():
     b = SourceCell(cell_id="r0c1", row=0, col=1, is_header=False, text_raw="b")
     with pytest.raises(ValueError):
         build_grid([a, b])
+
+
+# ---- Dạng LaTeXML thật trong SciVer: bảng viết bằng <span class="ltx_tabular">
+SPAN_TABLE = """<figure class="ltx_table"><figcaption>Table 1: x</figcaption><span class="ltx_tabular">
+ <span class="ltx_thead"><span class="ltx_tr">
+  <span class="ltx_td ltx_th"><span class="ltx_tabular"><span class="ltx_tr"><span class="ltx_td">Generative</span></span>
+     <span class="ltx_tr"><span class="ltx_td">model</span></span></span></span>
+  <span class="ltx_td ltx_th ltx_colspan ltx_colspan_2">AwA</span></span>
+ <span class="ltx_tr"><span class="ltx_td ltx_th"></span><span class="ltx_td ltx_th">S</span><span class="ltx_td ltx_th">U</span></span></span>
+ <span class="ltx_tbody"><span class="ltx_tr"><span class="ltx_td ltx_rowspan ltx_rowspan_2">VAE</span>
+   <span class="ltx_td">72.6</span><span class="ltx_td">cVAE [7 ###reference_b7###]</span></span>
+  <span class="ltx_tr"><span class="ltx_td">1</span><span class="ltx_td">2</span></span></span></span></figure>"""
+
+
+def test_latexml_span_tabular_with_class_spans_and_nested_header():
+    from sciverx.tables.html_cells import parse_table_html
+    cells, n_header, parts = parse_table_html(SPAN_TABLE)
+    by = _by_id(cells)
+    assert (n_header, parts) == (2, 1)
+    assert by["r0c0"].text_raw == "Generative model"   # bảng lồng trong ô tiêu đề
+    assert by["r0c1"].colspan == 2 and by["r2c0"].rowspan == 2
+    assert by["r2c2"].text_raw == "cVAE [7]"            # bỏ dấu vết ###reference_b7###
+    assert [c.cell_id for c in cells if c.row == 3] == ["r3c1", "r3c2"]
+    grid = build_grid(cells)
+    assert merged_column_headers(grid, n_header, normalized=False) == ["Generative model", "AwA / S",
+                                                                       "AwA / U"]
+
+
+def test_multi_part_tables_are_stacked():
+    from sciverx.tables.html_cells import parse_table_html
+    html = ("<figure><table><thead><tr><th>A</th><th>x</th></tr></thead><tr><td>a</td><td>1</td></tr></table>"
+            "<table><thead><tr><th>B</th><th>y</th></tr></thead><tr><td>b</td><td>2</td></tr></table></figure>")
+    cells, n_header, parts = parse_table_html(html)
+    assert (n_header, parts) == (1, 2)
+    assert [c.cell_id for c in cells] == ["r0c0", "r0c1", "r1c0", "r1c1", "r2c0", "r2c1", "r3c0", "r3c1"]
+    assert _by_id(cells)["r2c0"].is_header
+
+
+def test_guess_header_rows_when_not_declared():
+    # LaTeXML chỉ đánh ltx_th_row cho cột đầu, không có thead
+    html = ("<table><tr><th class='ltx_th_row'>Model</th><td>RTE</td><td>MRPC</td></tr>"
+            "<tr><th class='ltx_th_row'>BERT</th><td>66.4</td><td>84.8</td></tr></table>")
+    cells, n_header = parse_html_table(html)
+    assert n_header == 1
+    numeric_first = "<table><tr><td>a</td><td>1</td></tr><tr><td>b</td><td>2</td></tr></table>"
+    assert parse_html_table(numeric_first)[1] == 0
