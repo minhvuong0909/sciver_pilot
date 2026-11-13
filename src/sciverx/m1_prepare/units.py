@@ -157,22 +157,45 @@ def table_units(rec: TableRecord, limit: int, count: Counter_, log: list[dict]) 
         if count(text_for([r], all_cols)) <= limit:
             group = [r]
             continue
-        # một hàng vượt giới hạn: chia theo cột, mỗi phần giữ cột 0 (tiêu đề hàng)
+        # một hàng vượt giới hạn: chia theo cột, mỗi phần giữ cột 0 (tiêu đề hàng);
+        # một phần vẫn quá dài (ô chứa cả đoạn văn) thì chia chữ của hàng theo từ.
         log.append({"where": rec.table_record_id, "action": "split_row_by_columns", "row": r})
-        cols: list[int] = [0]
-        for c in all_cols[1:]:
-            if count(text_for([r], cols + [c])) <= limit or cols == [0]:
-                cols.append(c)
-            else:
-                t = text_for([r], cols)
+        lead = [0] if grid.n_cols > 1 else []
+
+        def emit(cols: list[int]) -> None:
+            t = text_for([r], cols)
+            if count(t) <= limit:
                 units.append(EvidenceUnit(unit_id=uid.format(kind="table_rows", part=f"{cond}-{len(units)}"),
                                           kind="table_rows", text=t, n_wordpieces=count(t),
                                           row_range=(r, r), **base))
-                cols = [0, c]
-        t = text_for([r], cols)
-        units.append(EvidenceUnit(unit_id=uid.format(kind="table_rows", part=f"{cond}-{len(units)}"),
-                                  kind="table_rows", text=t, n_wordpieces=count(t),
-                                  row_range=(r, r), **base))
+                return
+            log.append({"where": rec.table_record_id, "action": "split_cell_by_words", "row": r,
+                        "cols": cols})
+            prefix = text_for([], cols)
+            words = _row_line(grid, r, cols).split()
+            chunk: list[str] = []
+            for w in words + [None]:
+                trial = chunk + [w] if w is not None else chunk
+                if w is not None and count(prefix + "\n" + " ".join(trial)) <= limit:
+                    chunk = trial
+                    continue
+                if chunk:
+                    t = prefix + "\n" + " ".join(chunk)
+                    units.append(EvidenceUnit(unit_id=uid.format(kind="table_rows", part=f"{cond}-{len(units)}"),
+                                              kind="table_rows", text=t, n_wordpieces=count(t),
+                                              row_range=(r, r), **base))
+                chunk = [w] if w is not None else []
+
+        cols = list(lead)
+        for c in (all_cols[1:] if lead else all_cols):
+            trial = cols + [c]
+            if count(text_for([r], trial)) <= limit or cols == lead:
+                cols = trial
+                continue
+            emit(cols)
+            cols = lead + [c]
+        if cols != lead:
+            emit(cols)
     flush()
     if not units:  # bảng chỉ có tiêu đề
         t = text_for([], all_cols)

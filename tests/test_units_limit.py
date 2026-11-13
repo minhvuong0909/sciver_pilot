@@ -95,3 +95,15 @@ def test_chart_captions_only_when_mixed():
     b, _ = build_units("p", PAPER, [], limit=50, count=wc, allow_mixed=True)
     assert not any(u.kind == "chart_caption" for u in a)
     assert [u.parent_id for u in b if u.kind == "chart_caption"] == ["5"]
+
+
+def test_single_column_cell_longer_than_limit_split_by_words():
+    long = " ".join(f"w{i}" for i in range(40))
+    cells, nh = parse_html_table(f"<table><thead><tr><th>Question</th></tr></thead><tr><td>{long}</td></tr></table>")
+    rec = TableRecord(table_record_id="p::9::G1", paper_id="p", table_id="9", condition="G1", extractor="x",
+                      caption="T9", cells=cells, n_header_rows=nh, status="ok")
+    log = []
+    units = table_units(rec, limit=15, count=wc, log=log)
+    assert {e["action"] for e in log} == {"split_row_by_columns", "split_cell_by_words"}
+    assert all(u.n_wordpieces <= 15 and u.text.startswith("T9\nQuestion\n") for u in units)
+    assert " ".join(u.text.split("\n", 2)[2] for u in units) == long
