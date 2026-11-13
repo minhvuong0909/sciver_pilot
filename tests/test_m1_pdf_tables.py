@@ -89,3 +89,14 @@ def test_appendix_labels_map_dataset_ids_to_printed_labels(tmp_path):
     src = {"paper_id": "p", "tables": tables[1:2]}
     rec = extract_paper_from_pdf(src, pdf, Finder(), lambda p: ["Table C.1: Stats"], tmp_path / "c")[0]
     assert rec.table_id == "7" and rec.status == "ok" and rec.quality["label"] == "C.1"
+
+
+def test_pdf_failure_marks_tables_as_error_without_raising(tmp_path):
+    pdf = tmp_path / "p.pdf"
+    pdf.write_bytes(b"%PDF")
+    src = {"paper_id": "p", "tables": [{"table_id": "1", "caption": "Table 1: a"}]}
+
+    def broken(_):
+        raise RuntimeError("corrupt xref")
+    recs = extract_paper_from_pdf(src, pdf, FakeFinder(), broken, tmp_path / "c")
+    assert recs[0].status == "error" and "corrupt xref" in recs[0].quality["error"]

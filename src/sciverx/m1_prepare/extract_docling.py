@@ -132,10 +132,17 @@ def extract_paper_from_pdf(src: dict, pdf: Path | None, finder, page_texts, cach
         pages_of = cached["pages_of"]
         found = [FoundTable(**f) for f in cached["found"]]
     else:
-        pages_of = caption_pages(page_texts(pdf), list(labels.values()))
-        found = []
-        for rng in page_groups([p for ps in pages_of.values() for p in ps]):
-            found += finder.find(pdf, rng)
+        try:
+            pages_of = caption_pages(page_texts(pdf), list(labels.values()))
+            found = []
+            for rng in page_groups([p for ps in pages_of.values() for p in ps]):
+                found += finder.find(pdf, rng)
+        except Exception as exc:  # một PDF lỗi không được làm dừng cả lượt chạy
+            err = f"{type(exc).__name__}: {str(exc)[:160]}"
+            return [TableRecord(table_record_id=TableRecord.make_id(src["paper_id"], t, "E0"),
+                                paper_id=src["paper_id"], table_id=t, condition="E0", extractor=finder.name,
+                                caption=caps[t], cells=[], n_header_rows=0, status="error",
+                                quality={"source": "pdf", "error": err}) for t in tids]
         cache_dir.mkdir(parents=True, exist_ok=True)
         hit.write_text(json.dumps({"pages_of": pages_of, "found": [vars(f) for f in found]}), encoding="utf-8")
     matched = match_tables(found, pages_of)
