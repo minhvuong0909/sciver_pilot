@@ -1,0 +1,12 @@
+# Từ chỉ thứ hạng: claim chứa một trong các từ này được gắn cờ format_dependent=true (SPEC M1.4).
+# Mỗi dòng một từ/cụm từ, so khớp không phân biệt hoa thường, theo ranh giới từ.
+best
+highest
+lowest
+outperform
+outperforms
+outperformed
+outperforming
+state-of-the-art
+sota
+bold
