@@ -1,0 +1,3 @@
+# X2 — chỉ số truy xuất (SPEC mục 9): BM25 / dense / hybrid trên kho G1 và E1.
+base: ../base.yaml
+experiment: x2_retrieval
