@@ -25,7 +25,7 @@ STAGES: dict[str, str] = {
     "cellmap": "sciverx.m1_prepare.table_stages:run_cellmap",
     "units": "sciverx.m1_prepare.units:run",
     "index": "sciverx.m1_prepare.index:run",
-    "retrieve": "sciverx.m3_retrieve.retrieve:run",
+    "retrieve": "sciverx.m3_retrieve.stage:run",
     "align": "sciverx.m4_align.align:run",
     "numeric": "sciverx.m5_numeric.calculator:run",
     "package": "sciverx.m6_package.package:run",
