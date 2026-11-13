@@ -1,347 +1,193 @@
-# SciVer-TableVerify
+# Pilot SciVer: bảng dạng ảnh, bảng chuẩn và bảng trích (Qwen2.5-VL-7B)
 
-**Kiểm chứng claim khoa học có bảng biểu: truy xuất, căn chỉnh và xử lý số liệu trên benchmark SciVer**
+Pilot 1 tuần trên **40 claim** dùng bảng của SciVer (ACL 2025), cùng dataset và model với paper.
+Mục tiêu: đánh giá **độ ổn định** và **việc pipeline chạy trọn vẹn được hay không**, chưa kết luận cải thiện
+(mỗi claim là 2,5 điểm %, khoảng tin cậy 95% rộng khoảng ±15 điểm).
 
-![status](https://img.shields.io/badge/status-in%20development-orange) ![python](https://img.shields.io/badge/python-3.10%20%7C%203.11-blue) ![model](https://img.shields.io/badge/verifier-Qwen2.5--VL--7B-purple) ![spec](https://img.shields.io/badge/spec-v1.1-lightgrey)
-
-Dự án thuộc hướng **Numeric & Table-Aware Verification** của nhóm WorkplaceFactBench. Hệ thống nhận một claim và bài báo nguồn, rồi thực hiện bốn bước:
-
-1. Tìm bằng chứng (đoạn văn và bảng) trong bài.
-2. Căn chỉnh claim tới đúng ô hoặc đúng đoạn.
-3. Trích các phép kiểm tra số liệu.
-4. Đóng gói kết quả cho bộ kiểm chứng kết luận **Entailed** hoặc **Refuted**.
-
-Thực nghiệm chạy trên **toàn bộ** claim có bằng chứng bảng của SciVer (ACL 2025). Model kiểm chứng giống paper gốc là `Qwen2.5-VL-7B-Instruct`.
-
-> Đặc tả kỹ thuật đầy đủ nằm ở [`SPEC_SciVer_TableVerify.md`](SPEC_SciVer_TableVerify.md). Khi README và SPEC khác nhau, **SPEC là chuẩn**.
-
----
-
-## Mục lục
-- [Câu hỏi nghiên cứu](#câu-hỏi-nghiên-cứu)
-- [Kiến trúc](#kiến-trúc)
-- [Thiết kế thực nghiệm](#thiết-kế-thực-nghiệm)
-- [Cài đặt](#cài-đặt)
-- [Dữ liệu](#dữ-liệu)
-- [Chạy pipeline](#chạy-pipeline)
-- [Kết quả đầu ra](#kết-quả-đầu-ra)
-- [Đánh giá](#đánh-giá)
-- [Tái lập và nguyên tắc dữ liệu](#tái-lập-và-nguyên-tắc-dữ-liệu)
-- [Kiểm thử](#kiểm-thử)
-- [Cấu trúc repo](#cấu-trúc-repo)
-- [Lộ trình](#lộ-trình)
-- [Khác biệt so với code gốc SciVer](#khác-biệt-so-với-code-gốc-sciver)
-- [Nhóm thực hiện](#nhóm-thực-hiện)
-- [Trích dẫn và giấy phép](#trích-dẫn-và-giấy-phép)
-
----
-
-## Câu hỏi nghiên cứu
-
-| | Câu hỏi |
-|---|---|
-| **RQ1 — Dạng bảng** | Cùng claim, cùng model, cùng vị trí bằng chứng: đưa bảng dưới dạng **ảnh**, **bảng chuẩn dạng văn bản** hoặc **bảng trích tự động bằng Docling** làm kết luận thay đổi thế nào? Lỗi trích xuất nào liên quan đến việc đổi kết luận? |
-| **RQ2 — Truy xuất** | Cùng kho và cùng ngân sách đầu vào: **BM25**, **vector** và **hybrid (RRF)** tìm bằng chứng tốt đến đâu, và kết luận thay đổi ra sao? |
-| **RQ3 — Căn chỉnh và số liệu** | So với chỉ đưa kết quả truy xuất, thêm bước **căn chỉnh (M4)**, rồi thêm **xử lý số liệu (M5)**, thay đổi kết luận thế nào? |
-
----
-
-## Kiến trúc
+## 1. Tổng quan pipeline
 
 ```
-                        ┌──────────────────────── Tài liệu nguồn (bài báo SciVer) ───────────────────────┐
-                        │ sections · mọi bảng (ảnh) · mọi biểu đồ                                          │
-                        └───────────────────────────────────────┬─────────────────────────────────────────┘
-                                                                ▼
- M1  Chuẩn bị & lập chỉ mục ── bảng chuẩn G0 (JSON / HTML arXiv đúng phiên bản)  ─┐
-                              bảng trích  E0 (Docling)                              ├─► chuẩn hóa → G1 / E1
-                              TEDS · ánh xạ ô E↔G · đơn vị tìm kiếm ≤ 384 token    ─┘   chỉ mục BM25 + vector
-                                                                ▼
- Claim ──► (M2 trích atomic claim — mở rộng) ──► M3  Hybrid Search: BM25 + vector + RRF, gộp theo bảng/đoạn cha
-                                                                ▼
-                                                 M4  Căn chỉnh: chọn đúng bảng, ô, đoạn  (matched / ambiguous / …)
-                                                                ▼
-                                                 M5  Số liệu: toán hạng có nguồn, phép tính, đơn vị, thời gian
-                                                                ▼
-                                                 M6  Đóng gói EvidencePackage (JSON, kiểm định Pydantic)
-                                                                ▼
-                                                 Verifier  Qwen2.5-VL-7B (vLLM) ──► Entailed / Refuted
+SciVer (validation)
+   │  s01  chọn 40 claim dùng bảng (4 tập con × 10, mỗi tập con 5 Entailed / 5 Refuted)
+   ▼
+ảnh bảng (như paper) ──────────────────────────────────────────────► IMG ─┐
+   │                                                                      │
+   ├─ s03  bảng chuẩn từ JSON/HTML arXiv ──► G0 ──(s05 chuẩn hóa)──► G1 ──┤
+   │        (nhóm kiểm tay gold_review.csv)                               │
+   └─ s04  Docling trích bảng từ ảnh ─────► E0 ──(s05 chuẩn hóa)──► E1 ──┤
+            s05: TEDS, TEDS-Struct, độ khớp số giữa E và G               │
+                                                                          ▼
+                      s06  Qwen2.5-VL-7B (vLLM), prompt CoT nguyên văn của SciVer
+                           4 lần chạy: 3 seed ở temperature 1.0 (như paper) + 1 lần temperature 0
+                                                                          ▼
+                      s07  chấm điểm (cách cũ của SciVer và cách mới), độ ổn định,
+                           đổi kết luận giữa các điều kiện, McNemar, summary.md
 ```
 
-| Module | Nhiệm vụ | Công cụ chính |
+| Điều kiện | Bảng đưa vào model | Câu hỏi trả lời |
 |---|---|---|
-| **M1** Chuẩn bị & lập chỉ mục | Ghép nguồn; bảng chuẩn và bảng trích cho **mọi** bảng của bài; chuẩn hóa; TEDS; ánh xạ ô; chia đơn vị; lập chỉ mục | Docling, BeautifulSoup/lxml, apted, Sentence Transformers, rank_bm25 |
-| **M2** Trích atomic claims | Tách bản thảo thành các claim kiểm chứng được *(mở rộng, chưa làm)* | Qwen2.5, Pydantic |
-| **M3** Hybrid Search | Truy xuất BM25 và vector, hợp nhất bằng RRF, gộp theo cha, áp ngân sách đầu vào | rank_bm25, `all-mpnet-base-v2`, NumPy |
-| **M4** Căn chỉnh | Chọn đúng nguồn, ô và đoạn; kiểm ID bằng code; ghi trạng thái mơ hồ | Qwen2.5-VL-7B (văn bản), Pydantic |
-| **M5** Số liệu | Phép kiểm tra số có cấu trúc: điểm % hay % tương đối, cực trị, "mọi/tất cả", bội số, dung sai theo câu chữ | Python `re`, `decimal` |
-| **M6** Đóng gói | JSON thống nhất, truy được về nguồn, ghi thông tin còn thiếu | Pydantic, JSONL |
+| IMG | Ảnh bảng, tiền xử lý giống code SciVer | Chạy lại baseline của paper |
+| G0 / G1 | Bảng chuẩn dạng văn bản, chưa / đã chuẩn hóa | Mức trần khi đọc bảng đúng; chuẩn hóa có làm hỏng bảng chuẩn không |
+| E0 / E1 | Bảng Docling dạng văn bản, chưa / đã chuẩn hóa | Tác động của lỗi trích xuất; chuẩn hóa có bù được không |
 
-> `alignment_status = matched` chỉ có nghĩa là **đã tìm được bằng chứng phù hợp để kiểm tra**. Nó không có nghĩa claim đúng.
+Khi bằng chứng là biểu đồ (claim "mixed"), biểu đồ vẫn được đưa vào dạng ảnh ở mọi điều kiện.
 
----
+### Khác biệt so với code gốc (phải ghi vào báo cáo)
+1. **Seed:** code gốc khai báo `GENERATION_SEED = 215` nhưng không truyền vào vLLM. Ở đây seed được truyền vào, và có thêm lần chạy temperature 0.
+2. **Chấm điểm:** code gốc tính Entailed nếu có chữ "yes" ở bất kỳ đâu. Ở đây báo **cả hai cách**; cách mới đọc dòng `Answer: yes/no` cuối cùng.
+3. **Điều kiện văn bản:** bảng được chèn ở đầu prompt ("Table content (as text):"). Với claim một bằng chứng, các cụm "the image" đổi thành "the table" (danh sách trong `src/prompts.py`, biến `TEXT_MODE_EDITS`). Phần còn lại của prompt giữ nguyên.
+4. **max_model_len = 32768:** code gốc để mặc định của vLLM cho Qwen. Nếu prompt dài hơn, tăng giá trị này hoặc báo lại số mẫu lỗi.
+5. Code gốc tạo `AutoProcessor(min_pixels, max_pixels)` nhưng chỉ dùng để dựng chat template, nên không ảnh hưởng ảnh đưa vào vLLM. Pilot này cũng không đặt giới hạn pixel, để giống hành vi thực tế của code gốc.
 
-## Thiết kế thực nghiệm
+## 2. Phần cứng
 
-Ba trục độc lập:
-
-| Trục | Giá trị |
+| Thành phần | Yêu cầu |
 |---|---|
-| **Hệ thống** | `B0` code SciVer gốc · `P0` pipeline của nhóm, chưa fine-tune · `P1` có fine-tune *(chỉ khi được duyệt)* |
-| **Thiết lập bằng chứng** | `S-oracle` cho sẵn vị trí bằng chứng chuẩn · `S-retr` chỉ truy xuất · `S-align4` + M4 · `S-align45` + M4 + M5 |
-| **Dạng bảng** | `IMG` ảnh · `G0` / `G1` bảng chuẩn chưa / đã chuẩn hóa · `E0` / `E1` bảng Docling chưa / đã chuẩn hóa |
+| GPU cho s06 | NVIDIA ≥ 24 GB VRAM. Khuyến nghị A100 40/80 GB hoặc L40S 48 GB. Với 24 GB (L4, A10G, RTX 4090), giảm `--max_model_len 16384` |
+| Docling (s04) | CPU là đủ cho khoảng 60 ảnh (chậm hơn GPU nhưng chạy được) |
+| Ổ đĩa | ~16 GB cho model + dung lượng dataset + ~5 GB cho môi trường |
+| Nơi thuê GPU | Colab Pro (A100), RunPod, Vast.ai, Lambda... hoặc GPU của trường |
 
-| ID | Hệ thống | Thiết lập | Bảng | Trả lời |
-|---|---|---|---|---|
-| X0 | B0 | gốc | IMG | Tái lập paper (toàn validation) và mốc trên tập đã lọc |
-| X1 / X1u | P0 | S-oracle | IMG, G0, G1, E0, E1 | RQ1; cầu nối prompt gốc ↔ prompt thống nhất |
-| X2 | — | truy xuất | kho G1, kho E1 | RQ2 (chỉ số truy xuất) |
-| X3 | P0 | S-retr | G1, E1 | RQ2 (kết luận) |
-| X4a / X4b | P0 | S-align4 / S-align45 | G1, E1 | RQ3: đóng góp của M4, rồi M4+M5 |
+Ước lượng: 40 claim × 5 điều kiện × 4 lần chạy = 800 lượt sinh, khoảng vài giờ GPU với bản 7B (cần đo thực tế).
 
-So sánh G↔E chỉ thực hiện trên các tập **ghép cặp** (`PAIRED_ORACLE`, `PAIRED_RETR`). Đây là các claim có đủ cả bảng chuẩn lẫn bảng trích, nên kết quả không bị lệch vì so hai tập claim khác nhau.
+## 3. Cài đặt
 
----
-
-## Cài đặt
-
-### Yêu cầu
-- Linux, NVIDIA GPU. Khuyến nghị A100 40/80 GB hoặc L40S 48 GB. GPU 24 GB cần thử trên các mẫu dài nhất trước khi dùng.
-- Conda, `git-lfs`, khoảng 60 GB đĩa trống.
-
-### Hai môi trường riêng
-Dùng hai môi trường vì vLLM và Docling có thể cần các phiên bản torch khác nhau.
+Dùng **hai môi trường riêng**, vì vLLM và Docling có thể kéo hai phiên bản torch khác nhau.
 
 ```bash
-# 1) Môi trường chính: vLLM, truy xuất, căn chỉnh, đánh giá
-conda create -y -n sciver python=3.10 && conda activate sciver
-pip install -r requirements/sciver.txt          # gồm vllm==0.9.0.1 (giống repo SciVer)
-pip install -e .
+# 0) Lấy code pilot (thư mục này) và vào thư mục gốc
+cd sciver_pilot
 
-# 2) Môi trường Docling: trích bảng từ ảnh (chạy được trên CPU)
-conda create -y -n docling python=3.11 && conda activate docling
-pip install -r requirements/docling.txt
-pip install -e .
+# 1) Môi trường GPU: vLLM + tải dataset SciVer + repo gốc + model Qwen2.5-VL-7B
+bash scripts/setup_gpu.sh
+
+# 2) Môi trường Docling
+bash scripts/setup_docling.sh
 ```
 
-### Tải dữ liệu và model
+Các lệnh bên trong `setup_gpu.sh`, nếu muốn chạy tay:
 ```bash
+conda create -y -n sciver python=3.10 && conda activate sciver
+pip install -r requirements-gpu.txt              # vllm==0.9.0.1 như repo SciVer
 git lfs install
-git clone https://huggingface.co/datasets/chengyewang/SciVer data/raw/SciVer
+git clone https://huggingface.co/datasets/chengyewang/SciVer data/SciVer
 git clone https://github.com/QDRhhhh/SciVer third_party/SciVer
 huggingface-cli download Qwen/Qwen2.5-VL-7B-Instruct
-python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('sentence-transformers/all-mpnet-base-v2')"
 ```
 
-Kiểm tra nhanh:
-```bash
-python -c "import vllm, torch; print(vllm.__version__, torch.cuda.is_available())"
-pytest -q
-```
+Kiểm tra: `python -c "import vllm, torch; print(vllm.__version__, torch.cuda.is_available())"` phải in `True`.
 
----
+## 4. Chạy từng bước
 
-## Dữ liệu
+Trước tiên xem tên file trong `data/SciVer` (`ls data/SciVer`) để biết file validation tên gì. Thay `validation.json` bên dưới nếu khác.
 
-| | Mô tả |
-|---|---|
-| Nguồn | SciVer: claim khoa học trên bài arXiv ngành CS, gán nhãn bởi chuyên gia |
-| Split | `validation` (1.000 claim): phát triển · `test` (2.000 claim): khóa, chỉ chạy một lần ở cuối |
-| Tiêu chí chọn | Claim có bằng chứng thị giác **chỉ là bảng**; giữ nguyên bằng chứng văn bản. Tùy chọn `allow_mixed` để gồm cả biểu đồ |
-| Quy mô | **Toàn bộ** claim thỏa tiêu chí. Số lượng thực tế được ghi trong [`docs/DATA_CARD.md`](docs/DATA_CARD.md) |
-
-Bảng chuẩn được lấy từ JSON của dataset nếu có. Nếu không có, lấy từ **HTML arXiv đúng phiên bản** của bài. Chất lượng bảng chuẩn được kiểm tay trên mẫu ngẫu nhiên và mọi bảng có độ khớp thấp.
-
----
-
-## Chạy pipeline
-
-Mọi bước dùng một CLI chung với file cấu hình YAML:
-
-```bash
-python -m sciverx <stage> --config configs/experiments/<experiment>.yaml
-```
-
-### Mức A — Triển khai module trên validation
 ```bash
 conda activate sciver
-python -m sciverx audit     --config configs/base.yaml          # kiểm dữ liệu D1–D8 (chỉ validation)
-python -m sciverx select    --config configs/base.yaml          # ClaimInput + GoldInfo (hai file riêng)
-python -m sciverx sources   --config configs/base.yaml          # danh sách mọi bảng, biểu đồ, section của mỗi bài
-python -m sciverx gold      --config configs/base.yaml          # bảng chuẩn G0 + file audit cần kiểm tay
+# Bước 1 (CHẠY TRÊN CẢ TẬP CỦA PAPER): lấy toàn bộ claim có bằng chứng thị giác là bảng (không cần biểu đồ)
+#   validation = tập dev (chỉnh prompt, luật chuẩn hóa, tham số), test = chỉ chạy 1 lần cho kết quả cuối
+python src/s01_select_samples.py --data_root data/SciVer --data_file data/SciVer/validation.json --all --out work_val/samples.json
+python src/s01_select_samples.py --data_root data/SciVer --data_file data/SciVer/test.json       --all --out work_test/samples.json
+#   (thêm --allow_mixed nếu muốn gồm cả claim cần bảng + biểu đồ; khi đó biểu đồ vẫn đưa vào dạng ảnh)
+#   Các bước sau dùng --samples work_val/samples.json --out_dir work_val (hoặc work_test).
+# Tùy chọn - chạy thử nhỏ trước: chọn 40 mẫu theo tầng (seed cố định, lưu ID)
+python src/s01_select_samples.py --data_root data/SciVer --data_file data/SciVer/validation.json \
+       --per_subset 10 --seed 2026 --out work/samples.json
+
+# Bước 2a: xem cấu trúc thật của dữ liệu (QUAN TRỌNG: xem tables[item] có sẵn HTML bảng không)
+python src/s02_inspect_tables.py --data_root data/SciVer --samples work/samples.json
+
+# Bước 2b: dựng bảng chuẩn -> work/gold/*.json + work/gold_review.csv
+python src/s03_build_gold.py --data_root data/SciVer --samples work/samples.json --out_dir work
+#   -> Nhóm mở gold_review.csv, so từng ảnh bảng với bảng chuẩn, điền ok=1/0; sửa tay file JSON nếu sai.
 
 conda activate docling
-python -m sciverx extract   --config configs/base.yaml          # bảng trích E0 bằng Docling
+# Bước 3: Docling trích bảng từ ảnh -> work/extracted_docling/*.json
+python src/s04_extract_docling.py --data_root data/SciVer --samples work/samples.json --out_dir work
+# Bước 4: tạo G0/G1/E0/E1, log chuẩn hóa, TEDS -> work/tables/, work/table_quality.csv
+python src/s05_normalize_and_score_tables.py --out_dir work
 
 conda activate sciver
-python -m sciverx normalize --config configs/base.yaml          # G1, E1 + normalize_log
-python -m sciverx quality   --config configs/base.yaml          # TEDS, TEDS-Struct, độ khớp số
-python -m sciverx cellmap   --config configs/base.yaml          # ánh xạ ô E↔G
-python -m sciverx units     --config configs/base.yaml          # đơn vị tìm kiếm ≤ 384 word pieces
-python -m sciverx index     --config configs/base.yaml          # chỉ mục BM25 + vector cho kho G1 và E1
+# Bước 5: xem trước prompt (không cần GPU), rồi chạy thật
+python src/s06_run_verifier.py --data_root data/SciVer --samples work/samples.json --out_dir work --dry_run
+python src/s06_run_verifier.py --data_root data/SciVer --samples work/samples.json --out_dir work \
+       --conditions IMG G0 G1 E0 E1 --model Qwen/Qwen2.5-VL-7B-Instruct
+#   (24 GB VRAM: thêm --max_model_len 16384; nhiều GPU: --tp 2)
+#   Chạy lại sẽ bỏ qua các lần đã có file -> an toàn khi bị ngắt giữa chừng.
 
-python -m sciverx verify    --config configs/experiments/x0_b0.yaml          # B0
-python -m sciverx retrieve  --config configs/experiments/x2_retrieval.yaml   # BM25 / dense / hybrid
-python -m sciverx align     --config configs/experiments/x4_align.yaml       # M4
-python -m sciverx numeric   --config configs/experiments/x4_align.yaml       # M5
-python -m sciverx package   --config configs/experiments/x4_align.yaml       # M6
-python -m sciverx evaluate  --config configs/experiments/x2_retrieval.yaml
+# Bước 6: đánh giá -> work/eval/summary.md, per_run.csv, stability.csv, flips.csv, per_claim.csv
+python src/s07_evaluate.py --out_dir work
 ```
 
-### Mức B — Thực nghiệm đầy đủ
-```bash
-python -m sciverx verify   --config configs/experiments/x1_oracle.yaml       # RQ1
-python -m sciverx verify   --config configs/experiments/x3_retr.yaml         # RQ2
-python -m sciverx verify   --config configs/experiments/x4a_align4.yaml      # RQ3 – M4
-python -m sciverx verify   --config configs/experiments/x4b_align45.yaml     # RQ3 – M4+M5
-python -m sciverx evaluate --config configs/experiments/x1_oracle.yaml
-python -m sciverx report   --config configs/base.yaml
+Hoặc chạy gộp: `bash scripts/run_pilot.sh` (dừng sau bước bảng chuẩn để kiểm tay), rồi `bash scripts/run_pilot.sh --after-gold`.
 
-# Test: chỉ sau khi cấu hình đã đóng băng trong configs/frozen/ và đã được duyệt
-python -m sciverx <stage> --config configs/frozen/<experiment>.yaml --split test
-```
-
-Thử nhanh khi phát triển: thêm `--limit 20` để chạy smoke test. Kết quả smoke test không dùng để báo cáo.
-
----
-
-## Kết quả đầu ra
-
-Mỗi lượt chạy được lưu ở `outputs/runs/<run_id>/` với `run_id = {ngày}_{thí nghiệm}_{split}_{hash cấu hình}`. Lượt chạy cũ không bao giờ bị ghi đè.
+## 5. Kết quả và cách đọc
 
 | File | Nội dung |
 |---|---|
-| `manifest.json` | Cấu hình đầy đủ, git commit, phiên bản thư viện và model, GPU, seed, danh sách ID, thời gian, số lỗi |
-| `tables/*.jsonl` | `TableRecord` cho G0/G1/E0/E1 (giữ cấu trúc ô gộp) |
-| `table_quality.csv`, `cell_mapping.jsonl` | TEDS, độ khớp số, ánh xạ ô E↔G |
-| `retrieval.jsonl` | Ứng viên theo thứ hạng: điểm BM25, vector và RRF |
-| `packages.jsonl` | `EvidencePackage`: bằng chứng, ô, đoạn, phép kiểm tra số, trạng thái, nguồn |
-| `verifier_requests.jsonl`, `verifier_outputs.jsonl` | Request (kèm hash) và câu trả lời của model, chấm theo cách cũ và cách mới |
-| `eval/` | Chỉ số, độ ổn định, McNemar, bootstrap theo cụm, `flips.csv` |
+| `work/eval/summary.md` | Bảng tóm tắt để dán vào báo cáo pilot |
+| `work/eval/stability.csv` | Accuracy TB và độ lệch giữa 3 seed, tỷ lệ claim nhất quán ở cả 3 seed, accuracy theo đa số, accuracy ở t=0 |
+| `work/eval/per_run.csv` | Accuracy từng lần chạy × cách chấm, theo tập con và theo nhãn, số câu không đọc được, bị cắt, token |
+| `work/eval/flips.csv` | Từng claim đổi đúng/sai giữa 2 điều kiện. **Nhóm điền cột `cause_manual`**: đọc ảnh / trích bảng / chuẩn hóa / suy luận / nhiễu seed |
+| `work/eval/per_claim.csv` | Ma trận claim × điều kiện (✓/✗) để xem tay |
+| `work/table_quality.csv` | TEDS, TEDS-Struct, precision/recall của số giữa bảng trích và bảng chuẩn |
+| `work/normalize_log.jsonl` | Mọi ô bị chuẩn hóa: trước, sau, luật |
 
----
+**Tiêu chí pilot đạt:**
+- Chạy trọn vẹn không phải sửa tay giữa chừng.
+- Tỷ lệ không đọc được câu trả lời (`unparsed`) < 5%.
+- Đo được độ lệch giữa các seed, và so được với khác biệt giữa các điều kiện.
+- Mọi trường hợp đổi kết luận đều có nguyên nhân trong `cause_manual`.
 
-## Đánh giá
+Không yêu cầu G1 phải hơn IMG.
 
-| Thành phần | Chỉ số |
+**Cách viết kết luận:** "Trên 40 claim pilot, quan sát thấy tín hiệu…; cần thực nghiệm quy mô lớn để kết luận." Không viết "cải thiện X%".
+
+## 6. Cấu trúc code
+
+```
+src/common.py          đọc dataset, tìm đường dẫn file, context/caption (giống code SciVer)
+src/tables.py          HTML -> grid (trải rowspan/colspan), bộ chuẩn hóa, linearize, trích số
+src/teds.py            TEDS / TEDS-Struct (theo định nghĩa PubTabNet, dùng thư viện apted)
+src/prompts.py         4 prompt CoT nguyên văn của SciVer + các chỉnh sửa cho chế độ văn bản
+src/s01 ... s07        các bước như mục 4
+scripts/               cài đặt và chạy gộp
+```
+
+Bộ chuẩn hóa (`tables.normalize_cell`) áp dụng **giống hệt** cho G và E:
+- dấu trừ Unicode → `-`
+- bỏ ký hiệu chú thích `* † ‡` sau số
+- `1,234` → `1234`
+- chuẩn khoảng trắng quanh `±` và `%`
+- `↑/↓` → "(higher/lower is better)"
+- ô trống kiểu `–`, `—`, `n/a` → `N/A`
+- gộp tiêu đề nhiều tầng thành "Cấp 1 / Cấp 2"
+
+Chữ đậm (đánh dấu kết quả tốt nhất) bị mất ở **cả** G và E khi chuyển thành văn bản. Đây là một giới hạn cần ghi vào báo cáo.
+
+## 7. Sự cố thường gặp
+
+| Hiện tượng | Cách xử lý |
 |---|---|
-| Trích bảng (M1) | TEDS, TEDS-Struct (giữ ô gộp), precision/recall số, % không tìm thấy bảng, % ô không ánh xạ được |
-| Truy xuất (M3) | Hit@k, Recall@k, VisualComplete@k, TextRecall@k, MRR, với k ∈ {1, 3, 5, 10}, tính ở mức bảng/đoạn cha |
-| Căn chỉnh (M4) | Độ chính xác chọn bảng; F1 tập ô **sau ánh xạ E↔G**; tỷ lệ ambiguous / not_found / parse_error |
-| Số liệu (M5) | Độ chính xác từng trường (quan hệ, toán hạng, đơn vị, thời gian, qualifier, tập so sánh) |
-| Đóng gói (M6) | % hợp lệ schema, % truy được về nguồn |
-| Toàn chuỗi | Accuracy, macro-F1, tỷ lệ không đọc được câu trả lời, độ ổn định qua 3 seed, token và thời gian mỗi claim |
+| `KeyError` tên trường ở s01/s02 | Dataset thật khác tên trường: sửa trong `src/common.py` (`evidence_items`, `caption_of`, `table_entry`) |
+| `FileNotFoundError` ảnh/paper | Kiểm tra `--data_root`; `PathResolver` tự tìm theo tên file trong toàn thư mục |
+| s03 báo `no_arxiv_id` / `not_found` | Xem `gold_review.csv`; mở `https://arxiv.org/html/<id>` thủ công, chép bảng vào file JSON tương ứng |
+| CUDA out of memory ở s06 | `--max_model_len 16384`, `--gpu_mem 0.85`, hoặc dùng GPU lớn hơn |
+| Nhiều `finish_reason = length` | Model sinh quá dài: giữ `--max_tokens 10240` như paper và ghi lại số mẫu bị cắt |
+| Docling lỗi import `ImageFormatOption` | Phiên bản Docling khác: code tự rơi về `DocumentConverter()` mặc định; ghi phiên bản trong báo cáo |
+| `no_table_found` từ Docling | Giữ nguyên (bảng rỗng, không loại mẫu): đây chính là một loại lỗi trích xuất cần đo |
 
-So sánh cặp dùng **McNemar chính xác** và **khoảng tin cậy 95% bằng bootstrap theo cụm bài báo**. Phân tích các claim đổi kết luận ghi lỗi quan sát được, nguyên nhân nghi ngờ (cho chọn nhiều) và mức chắc chắn. Khi diễn giải chỉ nói "liên quan", không nói "gây ra".
+## 8. Đã kiểm thử
+Mọi bước trừ phần gọi Docling và vLLM thật đã được chạy trên **dữ liệu giả** có cùng cấu trúc trường với code SciVer, gồm:
+- chọn mẫu theo tầng
+- HTML → grid với rowspan/colspan và ký hiệu toán LaTeXML
+- tìm bảng trong HTML arXiv theo id và theo caption
+- chuẩn hóa và TEDS
+- dựng prompt (`--dry_run`)
+- chấm điểm, độ ổn định, flips, McNemar
 
----
+Hai bước cần chạy thử đầu tiên trên máy có GPU là s04 (Docling) và s06 (vLLM). Bước s02 cho biết ngay tên trường của dataset thật có khớp không.
 
-## Tái lập và nguyên tắc dữ liệu
-
-- **Test bị khóa:** mọi lựa chọn được chỉnh trên validation. Test chỉ chạy một lần, với cấu hình đóng băng đã có hash và các so sánh đã đăng ký trước.
-- **Không lộ vị trí bằng chứng:** ở các thiết lập truy xuất, module chỉ nhận `ClaimInput` (claim, ID bài) và kho tài liệu. `GoldInfo` nằm ở file riêng và chỉ module đánh giá được đọc.
-- **Nhãn kết luận không bao giờ vào model**, ở mọi thiết lập.
-- **Kho công bằng:** kho bảng chuẩn và kho bảng trích có cùng danh sách nguồn và cùng quy tắc chia đơn vị.
-- **Không cắt âm thầm:** mọi việc cắt bớt token, hàng, ứng viên hay ảnh đều được ghi log.
-- **Sinh có kiểm soát:** 3 seed ở temperature 1.0 (giống paper) và 1 lượt temperature 0. Seed được truyền thật vào vLLM.
-
----
-
-## Kiểm thử
-
-```bash
-pytest -q                     # toàn bộ, dùng mock model, không cần GPU
-pytest -q tests/test_leakage* # chống lộ vị trí bằng chứng: so hash request khi xáo trộn GoldInfo
-```
-
-Bộ test gồm:
-- chống rò rỉ và kiểm tra kho G/E có cùng danh sách nguồn;
-- tokenizer giữ nguyên các dạng như `93.2`, `gpt-4o`, `f1@5`;
-- giới hạn 384 word pieces mỗi đơn vị;
-- RRF và gộp theo cha;
-- định nghĩa các chỉ số truy xuất;
-- ô gộp, luật chuẩn hóa, TEDS với các cặp bảng có kết quả biết trước, ánh xạ ô;
-- các quan hệ số của M5, ngân sách đầu vào, chấm điểm và schema.
-
----
-
-## Cấu trúc repo
-
-```
-sciver-tableverify/
-├── configs/            base.yaml · experiments/ · frozen/
-├── src/sciverx/
-│   ├── schemas.py      Pydantic: ClaimInput, GoldInfo, TableRecord, EvidencePackage, …
-│   ├── data/           audit, select, loader
-│   ├── tables/         ô gộp, chuẩn hóa, linearize, TEDS, ánh xạ ô
-│   ├── m1_prepare/     nguồn, bảng chuẩn, Docling, đơn vị, chỉ mục
-│   ├── m3_retrieve/    tokenizer, BM25, dense, RRF, ngân sách
-│   ├── m4_align/       căn chỉnh và kiểm định
-│   ├── m5_numeric/     phân tích số, quan hệ, dung sai
-│   ├── m6_package/     đóng gói
-│   ├── verifier/       prompt, dựng đầu vào, vLLM, chấm điểm
-│   ├── evaluation/     chỉ số, thống kê, báo cáo
-│   └── annotation/     xuất/nhập nhãn, độ đồng thuận
-├── tests/              fixtures, mocks
-├── docs/               VERIFICATION_LOG · DEVIATIONS · DATA_CARD · EXPERIMENTS · ANNOTATION_GUIDE · reports/
-├── requirements/       sciver.txt · docling.txt · *.lock.txt
-├── data/               (không commit) raw · interim · processed
-└── outputs/            (không commit) runs/<run_id>/
-```
-
----
-
-## Lộ trình
-
-**Mức A — Triển khai và bàn giao module (validation)**
-- [ ] A0 Repo, môi trường, schema, test và mock
-- [ ] A1 Kiểm dữ liệu D1–D8, chọn claim
-- [ ] A2 M1: bảng chuẩn, Docling, chuẩn hóa, TEDS, ánh xạ ô, đơn vị, chỉ mục
-- [ ] A3 X0: tái lập B0
-- [ ] A4 M3 + X2: truy xuất
-- [ ] A5 M4: căn chỉnh
-- [ ] A6 M5 + M6: số liệu, đóng gói, bàn giao
-
-**Mức B — Thực nghiệm đầy đủ**
-- [ ] B1 X1, X1u, X3, X4a, X4b trên validation
-- [ ] B2 Gán nhãn ô trên tập con validation; chấm M4/M5
-- [ ] B3 Đóng băng cấu hình và đăng ký trước các so sánh
-- [ ] B4 Chạy test, thống kê, báo cáo
-
-**Mở rộng:** M2 · PoT verifier · embedding thứ hai · reranker · kho nhiều bài · Qwen2.5-VL-72B · fine-tune (P1)
-
----
-
-## Khác biệt so với code gốc SciVer
-
-Danh sách đầy đủ kèm hash prompt nằm ở [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md). Các điểm chính:
-
-| Điểm | Code gốc | Dự án này |
-|---|---|---|
-| Seed | Khai báo `GENERATION_SEED=215` nhưng không truyền vào vLLM | Truyền thật; 3 seed (temperature 1.0) + 1 lượt temperature 0 |
-| Chấm điểm | Entailed nếu có chữ "yes" ở bất kỳ đâu | Báo cả cách cũ và cách mới (đọc dòng `Answer:` cuối cùng) |
-| Đầu vào bảng | Chỉ dạng ảnh | Thêm bảng chuẩn và bảng trích dạng văn bản (chỉ đổi "image" → "table") |
-| Prompt | 4 prompt theo loại claim | Giữ nguyên ở S-oracle; thêm prompt thống nhất cho các thiết lập không biết loại claim |
-| Bằng chứng | Cho sẵn theo nhãn | Thêm các thiết lập tự truy xuất và căn chỉnh |
-
----
-
-## Nhóm thực hiện
-
-Nhóm **WorkplaceFactBench**. Phân công đề xuất, chờ nhóm chốt:
-
-| Thành viên | Phần phụ trách |
-|---|---|
-| Vương | M1, M3: chuẩn bị nguồn, biểu diễn bảng, truy xuất; gán nhãn ô |
-| Viễn | M4–M6: căn chỉnh, xử lý số liệu, đóng gói; kiểm chéo nhãn |
-| Khoa | Bộ kiểm chứng, tích hợp đầu ra |
-
----
-
-## Trích dẫn và giấy phép
-
-Dự án dùng dữ liệu và code của **SciVer**. Khi công bố kết quả, hãy trích dẫn paper gốc theo BibTeX trên ACL Anthology: <https://aclanthology.org/2025.acl-long.420>. Code gốc ở <https://github.com/QDRhhhh/SciVer>, dữ liệu ở <https://huggingface.co/datasets/chengyewang/SciVer>.
-
-Các thành phần bên thứ ba khác: [Docling](https://github.com/docling-project/docling), [vLLM](https://github.com/vllm-project/vllm), [Qwen2.5-VL](https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct), [Sentence Transformers](https://www.sbert.net/), [rank_bm25](https://github.com/dorianbrown/rank_bm25). Mỗi thành phần tuân theo giấy phép riêng của nó. Trước khi phân phối lại dữ liệu hoặc trọng số model, hãy kiểm tra giấy phép tương ứng.
-
-Giấy phép của mã nguồn dự án: *chưa chọn* (nhóm cần quyết định trước khi công khai repo).
+## Nguồn
+- SciVer paper: https://aclanthology.org/2025.acl-long.420 · arXiv 2506.15569
+- Code gốc: https://github.com/QDRhhhh/SciVer · Data: https://huggingface.co/datasets/chengyewang/SciVer
+- TEDS: Zhong et al., 2020 (PubTabNet) · Docling: https://github.com/docling-project/docling

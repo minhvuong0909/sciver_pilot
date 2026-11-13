@@ -1,0 +1,7 @@
+# Môi trường "docling": trích bảng từ ảnh (chạy được trên CPU)
+docling
+beautifulsoup4
+lxml
+apted
+requests
+pandas
