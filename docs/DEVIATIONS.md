@@ -47,9 +47,24 @@ Hash = 16 ký tự đầu SHA-256 của nội dung template (prompt `_text` gồ
 - Section truy xuất được tính khớp section chuẩn khi trùng hoặc là tiểu mục của nó (nhãn ghi tới cấp 1–3, kho chia theo section lá).
 - Ô bảng quá dài (cả đoạn văn trong một ô) được chia theo từ, mỗi phần lặp lại caption và tiêu đề.
 
-## Ảnh và E0
+## E0: Docling trên PDF arXiv
 
-Theo quyết định của nhóm (2026-11-13): chỉ dùng ảnh có trong dataset. Bảng không có ảnh nằm trong kho E với `status=no_table_found`, `quality.image_missing=true`. Việc lấy ảnh/PDF cho các bảng này để sau.
+SPEC M1.3 chạy Docling trên **ảnh bảng**. Dataset chỉ có ảnh cho 379/1.327 bảng của các bài đã chọn (và gần như trùng với bảng làm bằng chứng), nên theo quyết định của nhóm (2026-11-13) E0 được lấy từ **PDF arXiv đúng phiên bản** của bài (`m1.docling.source: pdf`):
+
+- Chỉ đưa vào Docling các trang có dòng caption "Table N" (tìm bằng lớp chữ của PDF) để chạy được trên CPU.
+- **OCR tắt** khi đọc PDF (`do_ocr_pdf: false`) vì PDF arXiv đã có lớp chữ; OCR vẫn bật khi chạy trên ảnh.
+- **Cell matching bật** khi đọc PDF (`do_cell_matching_pdf: true`), khác SPEC (`do_cell_matching=False`, đặt cho ảnh). Với thiết lập của SPEC, Docling để trống chữ ở hàng tiêu đề của 238/1.220 bảng; thử trên 27 bảng của 3 bài, bật lên làm TEDS tăng 0,571 → 0,777 và không còn bảng mất tiêu đề. Nhánh ảnh vẫn tắt như SPEC.
+- Bảng Docling được ghép với `table_id` của dataset qua **nhãn in trên caption** lấy từ caption của dataset (ID của dataset đánh số liên tục, trong khi bảng phụ lục in là "Table C.1"; số La Mã được đổi sang số), hoặc theo trang khi chỉ còn đúng một bảng và một ID chưa ghép. Bảng không ghép được nằm trong kho với `status=no_table_found` và lý do trong `quality.reason`.
+- Lớp chữ PDF nối độ lệch chuẩn viết dạng chỉ số dưới vào số chính (`83.20.3`); Docling không tách được, lỗi này được phản ánh trong TEDS và độ khớp số.
+- Nhánh ảnh (`source: image`) vẫn giữ để so sánh trên các bảng có ảnh.
+
+## Chỉ số dưới / trên trong ô
+
+LaTeXML viết độ lệch chuẩn bằng `<sub>` (hoặc MathML `msub`). Chữ của ô ghi thành `78.9_{1.2}` (chỉ số trên không phải ký hiệu chú thích: `10^{-3}`) để không dính thành `78.91.2`; ký hiệu chú thích trong `<sup>` vẫn nối liền (`92.4*`).
+
+## Môi trường
+
+SPEC tách hai môi trường (`sciver` với vLLM, `docling`) để tránh xung đột torch. Máy phát triển (Windows, không GPU) không cài vLLM nên dùng **một** `.venv` Python 3.12 với torch 2.15 CPU, sentence-transformers 6.3, Docling 2.150. Trên máy GPU vẫn dùng hai môi trường theo `requirements/`.
 
 ## Trường dữ liệu bị loại
 
