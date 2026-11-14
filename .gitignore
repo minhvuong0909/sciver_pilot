@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Môi trường
+.venv/
+venv/
+.env
+.env.*
+
+# Dữ liệu, model, đầu ra (SPEC mục 2.10)
+/data/
+/outputs/
+/third_party/
+*.npy
+*.npz
+*.pt
+*.bin
+*.safetensors
+cache/
+.cache/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

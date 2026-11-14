@@ -1,0 +1,12 @@
+# Môi trường phát triển nhẹ (không GPU): chạy toàn bộ unit test bằng mock model.
+# Không gồm vllm, docling, torch, sentence-transformers; code import các gói này khi cần.
+pydantic>=2
+pyyaml
+numpy
+pandas
+scipy
+rank_bm25
+beautifulsoup4
+lxml
+apted
+pytest

@@ -1,0 +1,4 @@
+# X3 — RQ2 (kết luận): S-retr trên kho G1 và E1. hybrid: 4 lượt; bm25/dense: chỉ t0 (đổi method + sample_names).
+base: ../base.yaml
+experiment: x3_retr
+verifier: {setting: S-retr, system: P0, method: hybrid, table_conditions: [G1, E1]}

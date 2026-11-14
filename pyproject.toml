@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sciverx"
+version = "0.1.0"
+description = "Kiểm chứng claim khoa học có bảng biểu trên benchmark SciVer"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2",
+    "pyyaml",
+    "numpy",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+sciverx = "sciverx.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["src"]
