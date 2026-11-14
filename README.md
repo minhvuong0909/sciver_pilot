@@ -142,6 +142,16 @@ Không yêu cầu G1 phải hơn IMG.
 
 **Cách viết kết luận:** "Trên 40 claim pilot, quan sát thấy tín hiệu…; cần thực nghiệm quy mô lớn để kết luận." Không viết "cải thiện X%".
 
+### Kết quả đã chạy trên tập validation
+
+Pipeline chuẩn bị dữ liệu đã chạy xong trên validation: 291 claim, 213 bài, 1.327 bảng.
+
+![Kết quả pipeline trên validation](docs/images/ket-qua-validation.png)
+
+291 claim là các claim chỉ dùng bảng làm bằng chứng hình ảnh (tiêu chí SPEC 5.3), lấy từ 1.000 claim validation trên 405 bài arXiv. 213 là toàn bộ bài chứa các claim đó, không phải mẫu ngẫu nhiên.
+
+![Giải thích con số 213 bài](docs/images/mau-213-bai.png)
+
 ## 6. Cấu trúc code
 
 ```
