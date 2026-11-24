@@ -28,7 +28,7 @@ def test_summarize_counts_over_limit():
 
 
 def test_count_tokens_stage_oracle(mini_sciver, tmp_path):
-    from tests.test_verify_stage import _cfg
+    from test_verify_stage import _cfg       # thư mục tests/ nằm trên sys.path (không có __init__.py)
     cfg = _cfg(mini_sciver, tmp_path, "S-oracle", ["G1"])
     sizes = {}
 
