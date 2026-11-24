@@ -47,6 +47,45 @@ def claim_metrics(ranked: list[str], gold: GoldInfo, ks=KS) -> dict[str, float]:
     return out
 
 
+def evidence_kind(gold: GoldInfo) -> str:
+    """Nhóm claim theo loại bằng chứng thị giác: table_only | chart_only | table+chart | none."""
+    types = {v["item_type"] for v in gold.visual_items}
+    if not types:
+        return "none"
+    has_t, has_c = "table" in types, bool(types - {"table"})
+    return "table+chart" if has_t and has_c else ("table_only" if has_t else "chart_only")
+
+
+def per_claim_metrics(results: list[RetrievalResult], golds: dict[str, GoldInfo], ks=KS) -> dict[str, dict]:
+    return {r.claim_id: claim_metrics([c.parent_id for c in r.candidates], golds[r.claim_id], ks)
+            for r in results}
+
+
+def compare_runs(a: dict[str, dict], b: dict[str, dict], paper_of: dict[str, str] | None = None,
+                 metrics=("hit@5", "recall@5", "visual_complete@5"), n_boot: int = 1000,
+                 seed: int = 2026) -> dict:
+    """So B với A trên CÙNG tập claim (giao của hai bên).
+    - Chỉ số 0/1 (hit, visual_complete): McNemar chính xác.
+    - Mọi chỉ số: hiệu trung bình (B − A) và CI 95% bootstrap theo cụm bài (nếu có paper_of)."""
+    from sciverx.evaluation.stats import cluster_bootstrap_diff, mcnemar_exact
+    ids = sorted(set(a) & set(b))
+    out: dict = {"n_claims": len(ids)}
+    for m in metrics:
+        va = {c: a[c][m] for c in ids}
+        vb = {c: b[c][m] for c in ids}
+        row: dict = {"a": round(mean(va.values()), 4) if ids else 0.0,
+                     "b": round(mean(vb.values()), 4) if ids else 0.0}
+        row["diff"] = round(row["b"] - row["a"], 4)
+        if all(v in (0.0, 1.0) for v in [*va.values(), *vb.values()]):
+            mc = mcnemar_exact([bool(va[c]) for c in ids], [bool(vb[c]) for c in ids])
+            row.update({"b_only_better": mc["c"], "a_only_better": mc["b"], "mcnemar_p": round(mc["p_value"], 4)})
+        if paper_of and ids:
+            bs = cluster_bootstrap_diff(va, vb, {c: paper_of[c] for c in ids}, n_boot=n_boot, seed=seed)
+            row.update({"ci_low": round(bs["ci_low"], 4), "ci_high": round(bs["ci_high"], 4)})
+        out[m] = row
+    return out
+
+
 def evaluate_retrieval(results: list[RetrievalResult], golds: dict[str, GoldInfo], ks=KS,
                        group_by: dict[str, str] | None = None) -> dict[str, dict[str, float]]:
     """Trung bình theo claim; `group_by` (claim_id → nhóm, vd claim_type) cho thêm bảng con."""

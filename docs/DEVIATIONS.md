@@ -46,6 +46,7 @@ Hash = 16 ký tự đầu SHA-256 của nội dung template (prompt `_text` gồ
 - Khóa cha có tiền tố (`section:1`, `table:1`) vì ID section và ID bảng trùng nhau trong một bài.
 - Section truy xuất được tính khớp section chuẩn khi trùng hoặc là tiểu mục của nó (nhãn ghi tới cấp 1–3, kho chia theo section lá).
 - Ô bảng quá dài (cả đoạn văn trong một ô) được chia theo từ, mỗi phần lặp lại caption và tiêu đề.
+- **Tùy chọn cải thiện truy xuất (X2b, mặc định tắt):** `m3.rrf_weights` (RRF có trọng số; SPEC dùng RRF 1:1), `m3.rerank` (cross-encoder chấm lại `top_n` đơn vị đầu), `m3.visual_slots` (giữ ≥ n bảng/biểu đồ trong top-k). Lý do: trên 1.000 claim validation, hybrid 1:1 kém BM25 (Recall@5 75,8 so với 79,8; VisualComplete@5 66,2 so với 75,1) vì dense yếu (Recall@5 64,0). Chỉ chọn biến thể trên phần chỉnh của validation, xác nhận trên phần xác nhận (hyper_parameter.md mục 8).
 
 ## E0: Docling trên PDF arXiv
 

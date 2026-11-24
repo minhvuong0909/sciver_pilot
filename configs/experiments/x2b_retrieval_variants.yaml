@@ -1,0 +1,17 @@
+# X2b: so các cách cải thiện truy xuất trên cùng kho (chỉ validation, hyper_parameter.md mục 8).
+# Chạy: python -m sciverx retrieve --config configs/experiments/x2b_retrieval_variants.yaml
+#       python -m sciverx evaluate --config configs/experiments/x2b_retrieval_variants.yaml
+# evaluate so từng cặp biến thể cùng điều kiện bảng (compare/...: McNemar, bootstrap theo bài).
+# Tên biến thể không chứa "_" (dùng "-").
+base: ../base.yaml
+experiment: x2b_retrieval_variants
+m3:
+  variants:
+    - {name: bm25, method: bm25}                                   # nền (dòng B)
+    - {name: hybrid, method: hybrid}                               # RRF 1:1 (dòng C)
+    - {name: hybrid-w05, method: hybrid, rrf_weights: {bm25: 1.0, dense: 0.5}}
+    - {name: hybrid-w025, method: hybrid, rrf_weights: {bm25: 1.0, dense: 0.25}}
+    - {name: bm25-vs2, method: bm25, visual_slots: {k: 5, n: 2}}   # giữ ≥ 2 bảng/biểu đồ trong top 5
+    - {name: bm25-rerank, method: bm25, rerank: {model: cross-encoder/ms-marco-MiniLM-L-6-v2, top_n: 30}}
+    - {name: bm25-rerank-vs2, method: bm25, visual_slots: {k: 5, n: 2},
+       rerank: {model: cross-encoder/ms-marco-MiniLM-L-6-v2, top_n: 30}}

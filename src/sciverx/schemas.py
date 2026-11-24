@@ -125,6 +125,8 @@ class RetrievalCandidate(Record):
     dense_rank: int | None = None
     dense_score: float | None = None
     rrf_score: float | None = None
+    rerank_rank: int | None = None
+    rerank_score: float | None = None
     final_rank: int
 
 
