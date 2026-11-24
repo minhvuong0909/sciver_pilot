@@ -18,6 +18,8 @@ verifier:
   max_model_len: 32768
   max_tokens: 10240
   limit_mm_per_prompt: {image: 2}
+  revision: null      # revision model trên Hugging Face; null = mới nhất (ghi vào manifest)
+  max_retries: 1      # lô lỗi → gửi lại từng request, tối đa 1 lần nữa (hyper_parameter.md 9.1)
   samples: [{name: t1_s1, temperature: 1.0, seed: 1}, {name: t1_s2, temperature: 1.0, seed: 2},
             {name: t1_s3, temperature: 1.0, seed: 3}, {name: t0, temperature: 0.0, seed: 0}]
 eval: {bootstrap_n: 1000, bootstrap_seed: 2026, bootstrap_unit: paper}
