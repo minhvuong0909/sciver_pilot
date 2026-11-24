@@ -47,18 +47,19 @@ Ví dụ sai: `Feature_M3`, `fix bug`, `vuong-test`, `sua-loi-bảng`, `dev2`.
 Theo Conventional Commits:
 
 ```
-<type>(<scope>): <tiêu đề>
+<type>(<scope>): <subject>
 
-<thân bài>
+<body>
 
 <footer>
 ```
 
-### Tiêu đề
+**Ngôn ngữ:** toàn bộ commit message (tiêu đề, thân bài, footer) **viết bằng tiếng Anh**. Tiêu đề và mô tả PR cũng viết bằng tiếng Anh, vì tiêu đề PR trở thành commit trên `main` khi squash. Giữ nguyên tên kỹ thuật (`BM25`, `TEDS`, `parse_error`, tên hàm, tên file). Các commit cũ bằng tiếng Việt giữ nguyên, không sửa lịch sử.
 
-- Tối đa 72 ký tự, không dấu chấm cuối câu.
-- Viết ở thể mệnh lệnh, mô tả việc commit làm: `thêm`, `sửa`, `bỏ`, `đổi` — không viết `đã thêm`, `đang sửa`.
-- Viết bằng tiếng Việt; giữ nguyên tên kỹ thuật (`BM25`, `TEDS`, `parse_error`, tên hàm, tên file).
+### Tiêu đề (subject)
+
+- Tối đa 72 ký tự, không dấu chấm cuối câu, bắt đầu bằng chữ thường.
+- Viết ở thể mệnh lệnh (imperative), mô tả việc commit làm: `add`, `fix`, `remove`, `rename` — không viết `added`, `fixes`, `adding`.
 - `<scope>` bỏ được nếu thay đổi trải trên nhiều module.
 
 ### Bảng `type`
@@ -89,34 +90,37 @@ Thay đổi làm lệch khỏi SPEC hoặc khỏi paper gốc phải nêu rõ tr
 
 ### Footer
 
-- `BREAKING CHANGE: <mô tả>` khi đổi schema, định dạng file đầu ra, hoặc làm cache cũ mất hiệu lực. Thêm `!` sau scope: `feat(schemas)!: ...`.
+- `BREAKING CHANGE: <description>` khi đổi schema, định dạng file đầu ra, hoặc làm cache cũ mất hiệu lực. Thêm `!` sau scope: `feat(schemas)!: ...`.
 - `Refs: #12` hoặc `Closes: #12` khi có issue liên quan.
 - `Co-Authored-By: ...` khi có đồng tác giả.
 
 ### Ví dụ
 
 ```
-feat(m3): thêm tokenizer giữ nguyên số thập phân và tên model
+feat(m3): add tokenizer that keeps decimals and model names
 
-BM25 của rank_bm25 nhận token do mình đưa vào, nên tokenizer mặc định
-tách `93.2` thành `93` và `2`, làm mất khớp với ô số trong bảng.
+rank_bm25 indexes the tokens we pass in, and the default tokenizer
+splits `93.2` into `93` and `2`, so claims no longer match numeric
+table cells.
 
-Tokenizer mới dùng regex ở SPEC mục M3, giữ nguyên `93.2`, `gpt-4o`,
-`f1@5`, `top-1`, `12.5%`. Ghi `tokenizer_version: v1` vào params.
+The new tokenizer uses the regex from SPEC section M3 and keeps
+`93.2`, `gpt-4o`, `f1@5`, `top-1`, `12.5%` intact. It writes
+`tokenizer_version: v1` into params.
 
-BREAKING CHANGE: chỉ mục BM25 dựng bằng tokenizer cũ phải dựng lại.
+BREAKING CHANGE: BM25 indexes built with the old tokenizer must be
+rebuilt.
 Refs: #7
 ```
 
 ```
-fix(tables): tính đúng span khi ô gộp nằm ở hàng tiêu đề cuối
+fix(tables): fix span of merged cells in the last header row
 ```
 
 ```
-docs(spec): làm rõ parse_error tách khỏi not_found
+docs(spec): clarify that parse_error is separate from not_found
 ```
 
-Ví dụ sai: `update`, `fix bug`, `WIP`, `sửa lại code m3 cho chạy được.`, `Feat: Add Tokenizer`.
+Ví dụ sai: `update`, `fix bug`, `WIP`, `fixed m3 so it runs.`, `Feat: Add Tokenizer`, `fix(m3): sửa tokenizer` (tiếng Việt).
 
 ### Quy tắc khác
 
@@ -150,24 +154,24 @@ Module mới thì thêm scope vào bảng này trong cùng PR.
 
 ## 5. Pull request
 
-**Tiêu đề:** đúng định dạng tiêu đề commit ở mục 3.
+**Tiêu đề:** đúng định dạng tiêu đề commit ở mục 3, bằng tiếng Anh.
 
-**Mô tả** theo mẫu:
+**Mô tả** bằng tiếng Anh, theo mẫu:
 
 ```markdown
-## Mục đích
-Vì sao cần PR này; dẫn mục SPEC hoặc issue liên quan.
+## Purpose
+Why this PR is needed; link the SPEC section or related issue.
 
-## Thay đổi
-- Gạch đầu dòng theo hành vi, không theo file.
+## Changes
+- Bullet points by behavior, not by file.
 
-## Kiểm thử
-- Lệnh đã chạy và kết quả (vd. `pytest tests/test_tokenizer.py` — 12 passed).
-- Nếu chưa chạy được phần nào thì ghi rõ.
+## Testing
+- Commands run and results (e.g. `pytest tests/test_tokenizer.py`: 12 passed).
+- State clearly anything that could not be run.
 
-## Ảnh hưởng
-- Chỉ số, cache, schema, cấu hình đóng băng bị đổi; hoặc "Không".
-- Lệch khỏi SPEC/paper: mô tả và dẫn dòng trong `docs/DEVIATIONS.md`; hoặc "Không".
+## Impact
+- Metrics, cache, schema or frozen configs that change; or "None".
+- Deviations from SPEC/paper: describe and point to the row in `docs/DEVIATIONS.md`; or "None".
 ```
 
 - PR nhỏ, một mục đích; nên dưới khoảng 400 dòng thay đổi.
@@ -180,5 +184,5 @@ Vì sao cần PR này; dẫn mục SPEC hoặc issue liên quan.
 2. Tên nhánh đúng mục 2.
 3. `git status` không có file dữ liệu, đầu ra, cache hay bí mật.
 4. Test liên quan đã chạy và qua.
-5. Tiêu đề commit đúng `<type>(<scope>): <tiêu đề>`, ≤ 72 ký tự.
+5. Tiêu đề commit đúng `<type>(<scope>): <subject>`, ≤ 72 ký tự, bằng tiếng Anh.
 6. Thân bài nêu được vì sao và ảnh hưởng, nếu thay đổi không hiển nhiên.
