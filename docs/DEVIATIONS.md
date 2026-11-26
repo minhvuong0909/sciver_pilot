@@ -39,7 +39,7 @@ Hash = 16 ký tự đầu SHA-256 của nội dung template (prompt `_text` gồ
 - **TEDS**: viết lại so với bản pilot — cây dựng từ `cells` còn rowspan/colspan và có `thead`/`tbody`, thay vì lưới đã trải.
 - **Luật chuẩn hóa** (thứ tự áp): tách ký hiệu chú thích → dấu trừ Unicode → khoảng trắng trước `%` → `±` → dấu nghìn → gắn lại `x [*]`; ô `–`, `—`, `-`, `n/a`, `na`, `NA` → `N/A`; mũi tên chỉ chú giải trong ô tiêu đề. Khác bản pilot: giữ ký hiệu chú thích và mũi tên thay vì xóa.
 - **Chữ đậm**: mặc định không đưa vào văn bản (`include_bold=false`) vì Docling không cho biết chữ đậm (`bold=None`). Claim chứa từ trong `configs/format_terms.txt` được gắn cờ `format_dependent`.
-- **Dấu vết tiền xử lý** `###reference_xx###` trong chữ ô bị bỏ.
+- **Dấu vết tiền xử lý** `###reference_xx###` trong chữ ô bị bỏ. Từ 26/11/2026 cũng bị bỏ trong **đơn vị đoạn văn** của kho tìm kiếm (khoảng 52% đơn vị còn dính, theo đánh giá 25/11), vì nó làm nhiễu BM25/embedding và làm prompt S-retr dài thêm. `char_start`/`char_end` vẫn trỏ vào section text gốc. **Context của S-oracle không đổi** (vẫn nguyên văn như code SciVer) để giữ baseline. Phải chạy lại `units` và `index`.
 
 ## Truy xuất
 

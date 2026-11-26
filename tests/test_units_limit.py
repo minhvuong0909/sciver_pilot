@@ -107,3 +107,15 @@ def test_single_column_cell_longer_than_limit_split_by_words():
     assert {e["action"] for e in log} == {"split_row_by_columns", "split_cell_by_words"}
     assert all(u.n_wordpieces <= 15 and u.text.startswith("T9\nQuestion\n") for u in units)
     assert " ".join(u.text.split("\n", 2)[2] for u in units) == long
+
+
+def test_paragraph_units_strip_reference_markers_keep_offsets():
+    from sciverx.m1_prepare.units import paragraph_units, strip_ref_markers
+    raw = "As shown in [7 ###reference_b7###], Ours wins ###table_ref_2### on SQuAD."
+    assert strip_ref_markers(raw) == "As shown in [7], Ours wins on SQuAD."
+    paper = {"sections": [{"section_id": "4", "section_name": "Results", "text": raw}]}
+    units = paragraph_units("p", paper, 100, wc, [])
+    assert units[0].text == "Results: As shown in [7], Ours wins on SQuAD."
+    assert "###" not in units[0].text
+    assert raw[units[0].char_start:units[0].char_end] == raw               # offset vẫn trỏ văn bản gốc
+    assert units[0].n_wordpieces == wc(units[0].text)
