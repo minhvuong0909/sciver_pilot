@@ -201,3 +201,25 @@ Hai bước cần chạy thử đầu tiên trên máy có GPU là s04 (Docling)
 - SciVer paper: https://aclanthology.org/2025.acl-long.420 · arXiv 2506.15569
 - Code gốc: https://github.com/QDRhhhh/SciVer · Data: https://huggingface.co/datasets/chengyewang/SciVer
 - TEDS: Zhong et al., 2020 (PubTabNet) · Docling: https://github.com/docling-project/docling
+
+## Chạy GPU lần đầu: so B0, IMG và G1 (X1-GPU)
+
+Mục tiêu: có kết quả độ chính xác đầu tiên của đề tài trên 291 claim bảng validation.
+
+| Điều kiện | Verifier nhận gì | Để trả lời |
+|---|---|---|
+| **B0** | Code SciVer **gốc** (`third_party/SciVer` @ `0a97282`), ảnh bảng | Mốc so với paper, trên đúng 291 claim |
+| **IMG** | Pipeline nhóm, S-oracle, ảnh bảng | Pipeline có bám đúng code gốc không (phải ≈ B0) |
+| **G1** | Pipeline nhóm, S-oracle, bảng chuẩn dạng chữ | Đưa bảng dạng chữ có giúp model 7B không (RQ1) |
+
+Trên máy Linux có GPU ≥ 24 GB, sau `bash scripts/setup_gpu.sh` và
+`python scripts/download_sciver_val.py --root data/raw/SciVer --images`:
+
+```bash
+SMOKE_ONLY=1 bash scripts/run_gpu_x1.sh   # chạy thử 5 claim: đo bộ nhớ, thời gian
+bash scripts/run_gpu_x1.sh                # chạy đầy đủ (bị ngắt thì chạy lại đúng lệnh này)
+```
+
+Log ghi ở `logs/run_gpu_x1_*.log`. Kết quả: `outputs/runs/<run_id>/eval/verdict_report.md`
+(accuracy theo `pred_new` và `pred_old`, theo loại claim và nhãn, tỷ lệ lỗi/rỗng/bị cắt, so
+với IMG bằng McNemar và CI 95% bootstrap theo bài).

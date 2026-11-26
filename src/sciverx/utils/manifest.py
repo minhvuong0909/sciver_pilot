@@ -34,6 +34,19 @@ def make_run_id(experiment: str, split: str, cfg: dict, date: dt.date | None = N
     return f"{date:%Y%m%d}_{experiment}_{split}_{config_hash(cfg)[:8]}"
 
 
+def find_or_make_run_id(outputs_root: str | Path, experiment: str, split: str, cfg: dict,
+                        date: dt.date | None = None) -> str:
+    """run_id của lượt chạy CÙNG cấu hình đã có (bất kể ngày), nếu có; nếu không thì tạo mới.
+    Để chạy tiếp qua nửa đêm hoặc hôm sau vẫn vào đúng thư mục cũ, và để evaluate/report
+    tìm được kết quả. Có nhiều thư mục khớp thì lấy cái mới nhất theo ngày trong tên."""
+    suffix = f"_{experiment}_{split}_{config_hash(cfg)[:8]}"
+    root = Path(outputs_root)
+    found = sorted(p.name for p in root.glob(f"*{suffix}")
+                   if p.is_dir() and len(p.name) == 8 + len(suffix) and p.name[:8].isdigit()) \
+        if root.exists() else []
+    return found[-1] if found else make_run_id(experiment, split, cfg, date)
+
+
 def git_commit(cwd: str | Path | None = None) -> str | None:
     try:
         out = subprocess.run(["git", "rev-parse", "HEAD"], cwd=cwd, capture_output=True,
