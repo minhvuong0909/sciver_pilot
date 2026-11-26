@@ -25,7 +25,7 @@ from sciverx.m3_retrieve.retrieve import PaperIndex
 from sciverx.pipeline import run_claim
 from sciverx.schemas import ClaimInput, EvidenceUnit, OracleEvidenceLocator, TableRecord, VerifierOutput
 from sciverx.utils.io import read_jsonl, write_jsonl
-from sciverx.utils.manifest import build_manifest, make_run_id, open_run_dir, update_manifest
+from sciverx.utils.manifest import build_manifest, find_or_make_run_id, open_run_dir, update_manifest
 from sciverx.verifier.build_inputs import BuiltInput, build_oracle
 from sciverx.verifier.run_vllm import preprocess_image, run_samples
 
@@ -93,7 +93,7 @@ def run_verify(cfg: dict, args, llm=None, count: Callable[[str], int] | None = N
     names = vcfg.get("sample_names")
     samples = [s for s in vcfg["samples"] if not names or s["name"] in names]
     exp = cfg.get("experiment", "verify")
-    run_id = make_run_id(exp, cfg["split"], cfg)
+    run_id = find_or_make_run_id(cfg["paths"]["outputs"], exp, cfg["split"], cfg)
     run_dir = Path(open_run_dir(cfg["paths"]["outputs"], build_manifest(run_id, cfg, [c.claim_id for c in claims])))
     system = vcfg.get("system", "P0")
     started = time.monotonic()

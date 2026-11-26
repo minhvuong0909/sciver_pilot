@@ -1,0 +1,17 @@
+# X1-GPU: lần chạy GPU đầu tiên. So 3 cách đưa bảng cho cùng verifier, trên cùng 291 claim bảng:
+#   B0  = code SciVer GỐC (third_party/SciVer @ 0a97282), ảnh bảng, 1 lượt temperature 1.0, không seed
+#   IMG = pipeline nhóm, S-oracle, ảnh bảng (phải ≈ B0 nếu pipeline bám đúng code gốc)
+#   G1  = pipeline nhóm, S-oracle, bảng chuẩn dạng chữ đã chuẩn hóa (câu hỏi RQ1)
+# Chạy toàn bộ: bash scripts/run_gpu_x1.sh   (xem đầu script để biết các biến môi trường)
+# Báo cáo: outputs/runs/<run_id>/eval/verdict_report.md
+base: ../base.yaml
+experiment: x1_gpu_img_g1
+verifier:
+  setting: S-oracle
+  system: P0
+  unified: false
+  table_conditions: [IMG, G1]
+  # 4 lượt (3 seed temperature 1.0 + t0). Muốn rẻ hơn: thêm sample_names: [t0] (chi phí 1/4,
+  # nhưng mất độ dao động và bỏ phiếu; B0 khi đó chỉ so được với t0).
+eval:
+  reference: IMG
