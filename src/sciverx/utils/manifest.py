@@ -80,6 +80,21 @@ def build_manifest(run_id: str, cfg: dict, claim_ids: list[str], **extra) -> Run
     )
 
 
+def update_manifest(run_dir: str | Path, **fields) -> RunManifest:
+    """Ghi thêm thông tin chỉ biết sau khi chạy (thời gian, số lỗi, engine…) vào
+    manifest.json đã có. Không đổi config, config_hash hay danh sách claim."""
+    mpath = Path(run_dir) / "manifest.json"
+    frozen = {"config", "config_hash", "claim_ids", "claim_ids_hash", "run_id"}
+    bad = frozen & set(fields)
+    if bad:
+        raise ValueError(f"Không được sửa {sorted(bad)} sau khi đã mở lượt chạy")
+    data = read_json(mpath)
+    data.update(fields)
+    manifest = RunManifest.model_validate(data)
+    write_json(mpath, manifest)
+    return manifest
+
+
 def open_run_dir(outputs_root: str | Path, manifest: RunManifest, resume: bool = True) -> Path:
     """Tạo outputs/runs/<run_id>/ và ghi manifest. Nếu thư mục đã có:
     - cùng config_hash và resume=True → dùng lại (chạy tiếp);

@@ -13,6 +13,8 @@ S-oracle (bỏ label).
 
 from __future__ import annotations
 
+import time
+from collections import Counter
 from pathlib import Path
 from typing import Callable
 
@@ -23,7 +25,7 @@ from sciverx.m3_retrieve.retrieve import PaperIndex
 from sciverx.pipeline import run_claim
 from sciverx.schemas import ClaimInput, EvidenceUnit, OracleEvidenceLocator, TableRecord
 from sciverx.utils.io import read_jsonl, write_jsonl
-from sciverx.utils.manifest import build_manifest, make_run_id, open_run_dir
+from sciverx.utils.manifest import build_manifest, make_run_id, open_run_dir, update_manifest
 from sciverx.verifier.build_inputs import BuiltInput, build_oracle
 from sciverx.verifier.run_vllm import preprocess_image, run_samples
 
@@ -80,7 +82,8 @@ def run_verify(cfg: dict, args, llm=None, count: Callable[[str], int] | None = N
         claims = claims[: cfg["limit"]]
     if llm is None:  # pragma: no cover - GPU
         from sciverx.verifier.run_vllm import VllmClient
-        llm = VllmClient(vcfg["model"], vcfg.get("max_model_len", 32768), vcfg.get("limit_mm_per_prompt"))
+        llm = VllmClient(vcfg["model"], vcfg.get("max_model_len", 32768), vcfg.get("limit_mm_per_prompt"),
+                         revision=vcfg.get("revision"))
     if count is None:  # pragma: no cover
         from sciverx.m3_retrieve.stage import qwen_token_counter
         count = qwen_token_counter(vcfg["model"])
@@ -93,14 +96,30 @@ def run_verify(cfg: dict, args, llm=None, count: Callable[[str], int] | None = N
     run_id = make_run_id(exp, cfg["split"], cfg)
     run_dir = Path(open_run_dir(cfg["paths"]["outputs"], build_manifest(run_id, cfg, [c.claim_id for c in claims])))
     system = vcfg.get("system", "P0")
+    started = time.monotonic()
+    counts: Counter = Counter()
     for cond in vcfg["table_conditions"]:
         inputs, packages = build_all_inputs(cfg, claims, cond, llm, count, embedder)
         write_jsonl(run_dir / cond / "verifier_requests.jsonl", [b.request for b in inputs])
         if packages:
             write_jsonl(run_dir / cond / "packages.jsonl", packages)
         outs = run_samples(llm, inputs, samples, vcfg.get("max_tokens", 10240), run_id=run_id, system=system,
-                           setting=vcfg["setting"], table_condition=cond, load_image=load_image)
+                           setting=vcfg["setting"], table_condition=cond, load_image=load_image,
+                           max_retries=vcfg.get("max_retries", 1))
         write_jsonl(run_dir / cond / "verifier_outputs.jsonl", outs)
+        counts.update(error_counts(outs))
         print(f"[verify] {vcfg['setting']}/{cond}: {len(inputs)} claim × {len(samples)} lượt")
-    print(f"[verify] → {run_dir}")
+    update_manifest(run_dir, model=vcfg["model"], model_revision=vcfg.get("revision"),
+                    seeds=[s["seed"] for s in samples], duration_s=round(time.monotonic() - started, 1),
+                    error_counts=dict(counts), runtime=getattr(llm, "runtime", {}))
+    print(f"[verify] → {run_dir}  (đếm: {dict(counts)})")
     return 0
+
+
+def error_counts(outs: list) -> dict[str, int]:
+    """Số đầu ra theo status, số bị cắt (finish_reason = length) và tổng số lần retry."""
+    c = Counter(o.status for o in outs)
+    c["truncated"] = sum(o.finish_reason == "length" for o in outs)
+    c["retries"] = sum(o.attempts - 1 for o in outs)
+    c["total"] = len(outs)
+    return dict(c)

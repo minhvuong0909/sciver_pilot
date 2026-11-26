@@ -94,3 +94,54 @@ def test_run_samples_with_mock_model(mini_sciver):
     assert [(o.sample_name, o.pred_new, o.seed) for o in outs] == [("t1_s1", True, 1), ("t0", False, 0)]
     assert [r.seed for r in llm.requests] == [1, 0]          # seed được truyền vào request
     assert all(o.request_hash == b.request.request_hash for o in outs)
+    assert all(o.status == "ok" and o.attempts == 1 for o in outs)
+
+
+class _FlakyLLM:
+    """Lô nhiều request luôn lỗi; request lẻ lỗi `fail_single` lần đầu rồi mới trả lời."""
+    model_name = "mock/flaky"
+
+    def __init__(self, fail_single: int):
+        self.fail_single = fail_single
+        self.calls = 0
+
+    def generate(self, reqs):
+        self.calls += 1
+        if len(reqs) > 1:
+            raise RuntimeError("batch OOM")
+        if self.fail_single > 0:
+            self.fail_single -= 1
+            raise TimeoutError("timeout")
+        from sciverx.llm import LLMResponse
+        return [LLMResponse(text="Answer: no", finish_reason="stop")]
+
+
+def _two_inputs(mini_sciver):
+    claims, golds, tables = _setup(mini_sciver)
+    out = []
+    for c, g in list(zip(claims, golds))[:2]:
+        paper = load_paper(mini_sciver, f"papers/{c.paper_id}.json")
+        out.append(build_oracle(c, OracleEvidenceLocator.from_gold(g), paper, "G1", tables, mini_sciver))
+    return out
+
+
+def test_run_samples_retry_counts_attempts(mini_sciver):
+    inputs = _two_inputs(mini_sciver)
+    llm = _FlakyLLM(fail_single=1)                           # request đầu lỗi 1 lần rồi được
+    outs = run_samples(llm, inputs, SAMPLES[:1], 64, run_id="r", system="P0", setting="S-oracle",
+                       table_condition="G1", load_image=lambda p: b"", max_retries=2)
+    assert [o.attempts for o in outs] == [3, 2]              # lô + 2 lần lẻ; lô + 1 lần lẻ
+    assert all(o.status == "ok" and o.pred_new is False for o in outs)
+
+
+def test_run_samples_retry_exhausted_is_error_not_refuted(mini_sciver):
+    inputs = _two_inputs(mini_sciver)
+    llm = _FlakyLLM(fail_single=99)
+    outs = run_samples(llm, inputs, SAMPLES[:1], 64, run_id="r", system="P0", setting="S-oracle",
+                       table_condition="G1", load_image=lambda p: b"", max_retries=1)
+    assert all(o.status == "error" and o.pred_new is None and o.pred_old is None for o in outs)
+    assert all(o.attempts == 2 and "TimeoutError" in o.error for o in outs)
+    llm0 = _FlakyLLM(fail_single=0)
+    outs0 = run_samples(llm0, inputs, SAMPLES[:1], 64, run_id="r", system="P0", setting="S-oracle",
+                        table_condition="G1", load_image=lambda p: b"", max_retries=0)
+    assert all(o.status == "error" and o.attempts == 1 for o in outs0)   # không retry

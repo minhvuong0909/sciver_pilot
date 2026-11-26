@@ -30,6 +30,7 @@ STAGES: dict[str, str] = {
     "numeric": "sciverx.verifier.stage:run_verify",
     "package": "sciverx.verifier.stage:run_verify",
     "verify": "sciverx.verifier.stage:run_verify",
+    "count-tokens": "sciverx.verifier.token_count:run",
     "evaluate": "sciverx.evaluation.report:run_evaluate",
     "report": "sciverx.evaluation.report:run_report",
     "annotate-export": "sciverx.annotation.export_tasks:run",

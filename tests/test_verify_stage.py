@@ -56,9 +56,15 @@ def test_verify_stage_end_to_end(mini_sciver, tmp_path, setting, conds, unified)
         assert len(outs) == 2 * len(reqs) == 6
         assert all(o.pred_new is True and o.evidence_setting == setting for o in outs)
         assert {r.request_hash for r in reqs} == {o.request_hash for o in outs}
+        assert all(o.status == "ok" for o in outs)
         if setting.startswith("S-align"):
             pkgs = read_jsonl(run_dir / cond / "packages.jsonl", EvidencePackage)
             assert len(pkgs) == 3 and all(p.evidence_setting == setting for p in pkgs)
             expected = "unified_v1_numeric" if setting == "S-align45" else "unified_v1"
             assert {r.prompt_id for r in reqs} == {expected}
     assert (run_dir / "manifest.json").exists()
+    m = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert m["model"] == "mock" and m["seeds"] == [1, 0] and m["duration_s"] is not None
+    assert m["error_counts"]["total"] == 6 * len(conds) and m["error_counts"]["ok"] == 6 * len(conds)
+    assert m["error_counts"]["retries"] == 0 and m["error_counts"]["truncated"] == 0
+    assert m["config_hash"] and m["claim_ids"]                 # update_manifest không xóa phần cũ

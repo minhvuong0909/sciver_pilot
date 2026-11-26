@@ -257,6 +257,10 @@ class VerifierOutput(Record):
     pred_old: bool | None = None
     pred_new: bool | None = None
     error: str | None = None
+    # ok | parse_error | empty | error — xem verifier.scoring.verifier_status
+    status: Literal["ok", "parse_error", "empty", "error"] = "ok"
+    attempts: int = 1                       # số lần gọi model cho request này (gồm retry)
+    image_sizes: list[list[int]] = []       # [rộng, cao] của từng ảnh sau tiền xử lý
 
 
 class RunManifest(Record):
@@ -275,3 +279,5 @@ class RunManifest(Record):
     seeds: list[int] = []
     duration_s: float | None = None
     error_counts: dict[str, int] = {}
+    # engine vLLM (V0/V1), dtype, max_model_len, tensor_parallel_size… đọc lúc chạy
+    runtime: dict = {}
