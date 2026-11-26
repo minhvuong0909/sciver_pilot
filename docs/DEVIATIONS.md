@@ -15,6 +15,8 @@ Mọi khác biệt so với code gốc SciVer và so với SPEC (SPEC 2.7, 14.1-
 | `pred_old` với đầu ra rỗng | Mẫu rỗng sai ở cả hai nhãn (`if item["response"]`) | `pred_old("")` = `None` (tính sai), giống gốc | Trước đây pilot tính mẫu rỗng là đúng với nhãn Refuted |
 | Trạng thái đầu ra | Không có | `VerifierOutput.status` ∈ `ok` / `parse_error` / `empty` / `error`; báo tỷ lệ trong `condition_summary.status_pct` | Tách lỗi kỹ thuật, đầu ra rỗng và lỗi định dạng |
 | Retry | Không có (một lần gọi cả tập) | Lô lỗi → gửi lại từng request, tối đa `verifier.max_retries` (mặc định 1); số lần gọi ghi ở `attempts`, tổng retry ở manifest | Quy tắc cố định, áp dụng đều cho mọi cấu hình |
+| Cách gửi cho vLLM | `llm.generate` cả tập trong một lần, template dựng bằng `AutoProcessor` | `llm.chat` theo lô `verifier.chunk_size` (mặc định 64), mỗi request một `SamplingParams` có seed riêng | Nhanh như gửi cả tập nhưng ghi ra đĩa sau mỗi lô. [CẦN KIỂM trên GPU] so chuỗi prompt và vài đầu ra với cách gửi từng câu |
+| Chạy tiếp từ chỗ dừng | Không có (ngắt giữa chừng là mất cả điều kiện) | Chạy lại cùng lệnh (cùng `run_id`) bỏ qua (claim, lượt) đã có đầu ra không lỗi và cùng `request_hash`; mẫu `status=error` được chạy lại | Tránh tốn giờ GPU khi máy bị ngắt |
 
 ## Prompt và hash
 

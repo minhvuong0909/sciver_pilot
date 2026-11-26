@@ -63,18 +63,25 @@ class VllmClient:  # pragma: no cover - cần GPU và vllm
                         "model_revision": revision, **_engine_info(self.llm)}
 
     def generate(self, requests: Sequence[LLMRequest]) -> list[LLMResponse]:
+        """Gửi CẢ LÔ trong một lần llm.chat để vLLM xử lý song song (nhanh hơn nhiều so với
+        từng câu). Mỗi request có SamplingParams riêng (seed riêng), nên kết quả của một
+        request không phụ thuộc request khác trong lô. vLLM trả đúng thứ tự đầu vào.
+        [CẦN KIỂM trên GPU] llm.chat nhận danh sách SamplingParams ở vLLM 0.9.0.1; so vài
+        claim với cách gửi từng câu trước khi chạy thật."""
         from vllm import SamplingParams
-        out = []
-        for req in requests:  # mỗi request có thể khác temperature/seed
+        if not requests:
+            return []
+        convs, sps = [], []
+        for req in requests:
             content = [{"type": "image_url", "image_url": {
                 "url": "data:image/jpeg;base64," + base64.b64encode(img).decode()}} for img in req.images]
             content.append({"type": "text", "text": req.prompt})
-            sp = SamplingParams(temperature=req.temperature, max_tokens=req.max_tokens, seed=req.seed)
-            o = self.llm.chat([{"role": "user", "content": content}], sp, use_tqdm=False)[0]
-            out.append(LLMResponse(text=o.outputs[0].text, finish_reason=o.outputs[0].finish_reason,
-                                   prompt_tokens=len(o.prompt_token_ids or []),
-                                   output_tokens=len(o.outputs[0].token_ids)))
-        return out
+            convs.append([{"role": "user", "content": content}])
+            sps.append(SamplingParams(temperature=req.temperature, max_tokens=req.max_tokens, seed=req.seed))
+        outs = self.llm.chat(convs, sps, use_tqdm=True)
+        return [LLMResponse(text=o.outputs[0].text, finish_reason=o.outputs[0].finish_reason,
+                            prompt_tokens=len(o.prompt_token_ids or []),
+                            output_tokens=len(o.outputs[0].token_ids)) for o in outs]
 
 
 def _engine_info(llm) -> dict:  # pragma: no cover - cần vllm
@@ -128,25 +135,55 @@ def _generate_with_retry(llm, reqs: list[LLMRequest], max_retries: int
 
 def run_samples(llm, inputs: list[BuiltInput], samples: list[dict], max_tokens: int, *, run_id: str,
                 system: str, setting: str, table_condition: str, load_image=preprocess_image,
-                max_retries: int = 1) -> list[VerifierOutput]:
-    """Gửi mọi input cho từng lượt sinh; một mẫu lỗi không làm dừng cả lượt."""
+                max_retries: int = 1, done: dict[tuple[str, str], str] | None = None,
+                chunk_size: int = 0, on_chunk=None) -> list[VerifierOutput]:
+    """Gửi input cho từng lượt sinh theo lô; một mẫu lỗi không làm dừng cả lượt.
+
+    Chạy tiếp được (resume): `done` = {(claim_id, sample_name): request_hash} của các đầu ra
+    đã có và không lỗi; request nào khớp cả ba thì bỏ qua. `chunk_size` > 0 chia mỗi lượt
+    thành lô nhỏ; sau mỗi lô gọi `on_chunk(outputs_của_lô)` để ghi ngay ra đĩa, nên GPU
+    ngắt giữa chừng chỉ mất tối đa một lô. Trả về các đầu ra MỚI sinh trong lần gọi này."""
+    done = done or {}
     outs: list[VerifierOutput] = []
-    images = [[load_image(p) for p in b.images] for b in inputs]
-    sizes = [[s for s in (image_size(img) for img in imgs) if s is not None] for imgs in images]
+    img_cache: dict[int, tuple[list[bytes], list[list[int]]]] = {}
+
+    def imgs_of(i: int):
+        if i not in img_cache:
+            imgs = [load_image(p) for p in inputs[i].images]
+            img_cache[i] = (imgs, [s for s in (image_size(x) for x in imgs) if s is not None])
+        return img_cache[i]
+
     for s in samples:
-        reqs = [LLMRequest(prompt=b.request.text, images=imgs, temperature=s["temperature"],
-                           seed=s["seed"], max_tokens=max_tokens)
-                for b, imgs in zip(inputs, images)]
-        resps, errors, attempts = _generate_with_retry(llm, reqs, max_retries)
-        for b, r, err, n, sz in zip(inputs, resps, errors, attempts, sizes):
-            outs.append(VerifierOutput(
-                claim_id=b.request.claim_id, run_id=run_id, system=system, evidence_setting=setting,
-                table_condition=table_condition, prompt_id=b.request.prompt_id,
-                request_hash=b.request.request_hash, sample_name=s["name"],
-                temperature=s["temperature"], seed=s["seed"], response=r.text,
-                finish_reason=r.finish_reason, prompt_tokens=r.prompt_tokens,
-                output_tokens=r.output_tokens, n_images=len(b.images),
-                pred_old=pred_old(r.text) if not err else None,
-                pred_new=pred_new(r.text) if not err else None, error=err,
-                status=verifier_status(r.text, err), attempts=n, image_sizes=sz))
+        todo = [i for i, b in enumerate(inputs)
+                if done.get((b.request.claim_id, s["name"])) != b.request.request_hash]
+        step = chunk_size if chunk_size > 0 else max(1, len(todo))
+        for c0 in range(0, len(todo), step):
+            idx = todo[c0:c0 + step]
+            chunk_outs = _run_chunk(llm, [inputs[i] for i in idx], [imgs_of(i) for i in idx], s, max_tokens,
+                                    max_retries, run_id=run_id, system=system, setting=setting,
+                                    table_condition=table_condition)
+            outs.extend(chunk_outs)
+            if on_chunk is not None:
+                on_chunk(chunk_outs)
+    return outs
+
+
+def _run_chunk(llm, inputs: list[BuiltInput], imgs: list[tuple[list[bytes], list[list[int]]]], s: dict,
+               max_tokens: int, max_retries: int, *, run_id: str, system: str, setting: str,
+               table_condition: str) -> list[VerifierOutput]:
+    outs: list[VerifierOutput] = []
+    reqs = [LLMRequest(prompt=b.request.text, images=im[0], temperature=s["temperature"],
+                       seed=s["seed"], max_tokens=max_tokens) for b, im in zip(inputs, imgs)]
+    resps, errors, attempts = _generate_with_retry(llm, reqs, max_retries)
+    for b, r, err, n, (_, sz) in zip(inputs, resps, errors, attempts, imgs):
+        outs.append(VerifierOutput(
+            claim_id=b.request.claim_id, run_id=run_id, system=system, evidence_setting=setting,
+            table_condition=table_condition, prompt_id=b.request.prompt_id,
+            request_hash=b.request.request_hash, sample_name=s["name"],
+            temperature=s["temperature"], seed=s["seed"], response=r.text,
+            finish_reason=r.finish_reason, prompt_tokens=r.prompt_tokens,
+            output_tokens=r.output_tokens, n_images=len(b.images),
+            pred_old=pred_old(r.text) if not err else None,
+            pred_new=pred_new(r.text) if not err else None, error=err,
+            status=verifier_status(r.text, err), attempts=n, image_sizes=sz))
     return outs

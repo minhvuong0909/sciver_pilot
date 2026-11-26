@@ -23,7 +23,7 @@ from sciverx.evaluation.gold_access import load_gold
 from sciverx.m1_prepare import tables_path, units_path, work_dir
 from sciverx.m3_retrieve.retrieve import PaperIndex
 from sciverx.pipeline import run_claim
-from sciverx.schemas import ClaimInput, EvidenceUnit, OracleEvidenceLocator, TableRecord
+from sciverx.schemas import ClaimInput, EvidenceUnit, OracleEvidenceLocator, TableRecord, VerifierOutput
 from sciverx.utils.io import read_jsonl, write_jsonl
 from sciverx.utils.manifest import build_manifest, make_run_id, open_run_dir, update_manifest
 from sciverx.verifier.build_inputs import BuiltInput, build_oracle
@@ -103,17 +103,56 @@ def run_verify(cfg: dict, args, llm=None, count: Callable[[str], int] | None = N
         write_jsonl(run_dir / cond / "verifier_requests.jsonl", [b.request for b in inputs])
         if packages:
             write_jsonl(run_dir / cond / "packages.jsonl", packages)
-        outs = run_samples(llm, inputs, samples, vcfg.get("max_tokens", 10240), run_id=run_id, system=system,
-                           setting=vcfg["setting"], table_condition=cond, load_image=load_image,
-                           max_retries=vcfg.get("max_retries", 1))
-        write_jsonl(run_dir / cond / "verifier_outputs.jsonl", outs)
+        out_path = run_dir / cond / "verifier_outputs.jsonl"
+        prev = load_previous_outputs(out_path)
+        done = {k: o.request_hash for k, o in prev.items() if o.status != "error"}
+        new = run_samples(llm, inputs, samples, vcfg.get("max_tokens", 10240), run_id=run_id, system=system,
+                          setting=vcfg["setting"], table_condition=cond, load_image=load_image,
+                          max_retries=vcfg.get("max_retries", 1), done=done,
+                          chunk_size=vcfg.get("chunk_size", 64),
+                          on_chunk=lambda chunk, p=out_path: append_jsonl(p, chunk))
+        # Ghi lại bản gọn: mỗi (claim, lượt) một dòng, bản mới thắng bản cũ, theo thứ tự input × lượt
+        merged = {**prev, **{(o.claim_id, o.sample_name): o for o in new}}
+        order = [(b.request.claim_id, s["name"]) for s in samples for b in inputs]
+        outs = [merged[k] for k in order if k in merged]
+        write_jsonl(out_path, outs)
         counts.update(error_counts(outs))
-        print(f"[verify] {vcfg['setting']}/{cond}: {len(inputs)} claim × {len(samples)} lượt")
+        print(f"[verify] {vcfg['setting']}/{cond}: {len(inputs)} claim × {len(samples)} lượt "
+              f"(mới {len(new)}, dùng lại {len(outs) - len(new)})")
     update_manifest(run_dir, model=vcfg["model"], model_revision=vcfg.get("revision"),
                     seeds=[s["seed"] for s in samples], duration_s=round(time.monotonic() - started, 1),
                     error_counts=dict(counts), runtime=getattr(llm, "runtime", {}))
     print(f"[verify] → {run_dir}  (đếm: {dict(counts)})")
     return 0
+
+
+def append_jsonl(path: Path, records: list) -> None:
+    """Ghi nối ngay sau mỗi lô (flush + fsync) để GPU ngắt giữa chừng không mất lô đã xong."""
+    import os
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8", newline="\n") as f:
+        for r in records:
+            f.write(r.model_dump_json() + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def load_previous_outputs(path: Path) -> dict[tuple[str, str], VerifierOutput]:
+    """Đầu ra đã có từ lần chạy trước (cùng run_id): (claim_id, sample_name) → bản ghi
+    cuối cùng. Dòng hỏng ở cuối file (ghi dở khi máy tắt) bị bỏ qua."""
+    out: dict[tuple[str, str], VerifierOutput] = {}
+    if not path.exists():
+        return out
+    import json
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            o = VerifierOutput.model_validate(json.loads(line))
+        except Exception:  # noqa: BLE001 - dòng ghi dở
+            continue
+        out[(o.claim_id, o.sample_name)] = o
+    return out
 
 
 def error_counts(outs: list) -> dict[str, int]:
