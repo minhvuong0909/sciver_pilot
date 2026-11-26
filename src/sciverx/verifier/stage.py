@@ -13,6 +13,8 @@ S-oracle (bỏ label).
 
 from __future__ import annotations
 
+import time
+from collections import Counter
 from pathlib import Path
 from typing import Callable
 
@@ -21,9 +23,9 @@ from sciverx.evaluation.gold_access import load_gold
 from sciverx.m1_prepare import tables_path, units_path, work_dir
 from sciverx.m3_retrieve.retrieve import PaperIndex
 from sciverx.pipeline import run_claim
-from sciverx.schemas import ClaimInput, EvidenceUnit, OracleEvidenceLocator, TableRecord
+from sciverx.schemas import ClaimInput, EvidenceUnit, OracleEvidenceLocator, TableRecord, VerifierOutput
 from sciverx.utils.io import read_jsonl, write_jsonl
-from sciverx.utils.manifest import build_manifest, make_run_id, open_run_dir
+from sciverx.utils.manifest import build_manifest, find_or_make_run_id, open_run_dir, update_manifest
 from sciverx.verifier.build_inputs import BuiltInput, build_oracle
 from sciverx.verifier.run_vllm import preprocess_image, run_samples
 
@@ -80,7 +82,8 @@ def run_verify(cfg: dict, args, llm=None, count: Callable[[str], int] | None = N
         claims = claims[: cfg["limit"]]
     if llm is None:  # pragma: no cover - GPU
         from sciverx.verifier.run_vllm import VllmClient
-        llm = VllmClient(vcfg["model"], vcfg.get("max_model_len", 32768), vcfg.get("limit_mm_per_prompt"))
+        llm = VllmClient(vcfg["model"], vcfg.get("max_model_len", 32768), vcfg.get("limit_mm_per_prompt"),
+                         revision=vcfg.get("revision"))
     if count is None:  # pragma: no cover
         from sciverx.m3_retrieve.stage import qwen_token_counter
         count = qwen_token_counter(vcfg["model"])
@@ -90,17 +93,72 @@ def run_verify(cfg: dict, args, llm=None, count: Callable[[str], int] | None = N
     names = vcfg.get("sample_names")
     samples = [s for s in vcfg["samples"] if not names or s["name"] in names]
     exp = cfg.get("experiment", "verify")
-    run_id = make_run_id(exp, cfg["split"], cfg)
+    run_id = find_or_make_run_id(cfg["paths"]["outputs"], exp, cfg["split"], cfg)
     run_dir = Path(open_run_dir(cfg["paths"]["outputs"], build_manifest(run_id, cfg, [c.claim_id for c in claims])))
     system = vcfg.get("system", "P0")
+    started = time.monotonic()
+    counts: Counter = Counter()
     for cond in vcfg["table_conditions"]:
         inputs, packages = build_all_inputs(cfg, claims, cond, llm, count, embedder)
         write_jsonl(run_dir / cond / "verifier_requests.jsonl", [b.request for b in inputs])
         if packages:
             write_jsonl(run_dir / cond / "packages.jsonl", packages)
-        outs = run_samples(llm, inputs, samples, vcfg.get("max_tokens", 10240), run_id=run_id, system=system,
-                           setting=vcfg["setting"], table_condition=cond, load_image=load_image)
-        write_jsonl(run_dir / cond / "verifier_outputs.jsonl", outs)
-        print(f"[verify] {vcfg['setting']}/{cond}: {len(inputs)} claim × {len(samples)} lượt")
-    print(f"[verify] → {run_dir}")
+        out_path = run_dir / cond / "verifier_outputs.jsonl"
+        prev = load_previous_outputs(out_path)
+        done = {k: o.request_hash for k, o in prev.items() if o.status != "error"}
+        new = run_samples(llm, inputs, samples, vcfg.get("max_tokens", 10240), run_id=run_id, system=system,
+                          setting=vcfg["setting"], table_condition=cond, load_image=load_image,
+                          max_retries=vcfg.get("max_retries", 1), done=done,
+                          chunk_size=vcfg.get("chunk_size", 64),
+                          on_chunk=lambda chunk, p=out_path: append_jsonl(p, chunk))
+        # Ghi lại bản gọn: mỗi (claim, lượt) một dòng, bản mới thắng bản cũ, theo thứ tự input × lượt
+        merged = {**prev, **{(o.claim_id, o.sample_name): o for o in new}}
+        order = [(b.request.claim_id, s["name"]) for s in samples for b in inputs]
+        outs = [merged[k] for k in order if k in merged]
+        write_jsonl(out_path, outs)
+        counts.update(error_counts(outs))
+        print(f"[verify] {vcfg['setting']}/{cond}: {len(inputs)} claim × {len(samples)} lượt "
+              f"(mới {len(new)}, dùng lại {len(outs) - len(new)})")
+    update_manifest(run_dir, model=vcfg["model"], model_revision=vcfg.get("revision"),
+                    seeds=[s["seed"] for s in samples], duration_s=round(time.monotonic() - started, 1),
+                    error_counts=dict(counts), runtime=getattr(llm, "runtime", {}))
+    print(f"[verify] → {run_dir}  (đếm: {dict(counts)})")
     return 0
+
+
+def append_jsonl(path: Path, records: list) -> None:
+    """Ghi nối ngay sau mỗi lô (flush + fsync) để GPU ngắt giữa chừng không mất lô đã xong."""
+    import os
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8", newline="\n") as f:
+        for r in records:
+            f.write(r.model_dump_json() + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def load_previous_outputs(path: Path) -> dict[tuple[str, str], VerifierOutput]:
+    """Đầu ra đã có từ lần chạy trước (cùng run_id): (claim_id, sample_name) → bản ghi
+    cuối cùng. Dòng hỏng ở cuối file (ghi dở khi máy tắt) bị bỏ qua."""
+    out: dict[tuple[str, str], VerifierOutput] = {}
+    if not path.exists():
+        return out
+    import json
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            o = VerifierOutput.model_validate(json.loads(line))
+        except Exception:  # noqa: BLE001 - dòng ghi dở
+            continue
+        out[(o.claim_id, o.sample_name)] = o
+    return out
+
+
+def error_counts(outs: list) -> dict[str, int]:
+    """Số đầu ra theo status, số bị cắt (finish_reason = length) và tổng số lần retry."""
+    c = Counter(o.status for o in outs)
+    c["truncated"] = sum(o.finish_reason == "length" for o in outs)
+    c["retries"] = sum(o.attempts - 1 for o in outs)
+    c["total"] = len(outs)
+    return dict(c)

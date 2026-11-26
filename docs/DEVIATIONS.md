@@ -11,7 +11,12 @@ Mọi khác biệt so với code gốc SciVer và so với SPEC (SPEC 2.7, 14.1-
 | Đầu vào bảng | Chỉ ảnh | Thêm bảng văn bản G0/G1/E0/E1: khối `Table content (as text):` + chú thích bảng; prompt 1 và 3 đổi "image" → "table" theo `TEXT_MODE_EDITS` | RQ1 |
 | Prompt | 4 prompt theo `claim_type` | Giữ nguyên ở S-oracle; thêm `unified_v1` / `unified_v1_numeric` cho các thiết lập không biết loại claim | SPEC 8.3 |
 | Bằng chứng | Cho sẵn theo nhãn | Thêm S-retr, S-align4, S-align45 | RQ2, RQ3 |
-| `max_model_len` | Mặc định của vLLM | 32768 (giảm nếu GPU không đủ, ghi vào VERIFICATION_LOG) | SPEC 8.1 — **chưa thử trên GPU** |
+| `max_model_len` | Mặc định của vLLM | 32768 (giảm nếu GPU không đủ, ghi vào VERIFICATION_LOG) | SPEC 8.1 — **chưa thử trên GPU**. Kiểm trước bằng `python -m sciverx count-tokens --config …` |
+| `pred_old` với đầu ra rỗng | Mẫu rỗng sai ở cả hai nhãn (`if item["response"]`) | `pred_old("")` = `None` (tính sai), giống gốc | Trước đây pilot tính mẫu rỗng là đúng với nhãn Refuted |
+| Trạng thái đầu ra | Không có | `VerifierOutput.status` ∈ `ok` / `parse_error` / `empty` / `error`; báo tỷ lệ trong `condition_summary.status_pct` | Tách lỗi kỹ thuật, đầu ra rỗng và lỗi định dạng |
+| Retry | Không có (một lần gọi cả tập) | Lô lỗi → gửi lại từng request, tối đa `verifier.max_retries` (mặc định 1); số lần gọi ghi ở `attempts`, tổng retry ở manifest | Quy tắc cố định, áp dụng đều cho mọi cấu hình |
+| Cách gửi cho vLLM | `llm.generate` cả tập trong một lần, template dựng bằng `AutoProcessor` | `llm.chat` theo lô `verifier.chunk_size` (mặc định 64), mỗi request một `SamplingParams` có seed riêng | Nhanh như gửi cả tập nhưng ghi ra đĩa sau mỗi lô. [CẦN KIỂM trên GPU] so chuỗi prompt và vài đầu ra với cách gửi từng câu |
+| Chạy tiếp từ chỗ dừng | Không có (ngắt giữa chừng là mất cả điều kiện) | Chạy lại cùng lệnh (cùng `run_id`) bỏ qua (claim, lượt) đã có đầu ra không lỗi và cùng `request_hash`; mẫu `status=error` được chạy lại | Tránh tốn giờ GPU khi máy bị ngắt |
 
 ## Prompt và hash
 
@@ -46,6 +51,10 @@ Hash = 16 ký tự đầu SHA-256 của nội dung template (prompt `_text` gồ
 - Khóa cha có tiền tố (`section:1`, `table:1`) vì ID section và ID bảng trùng nhau trong một bài.
 - Section truy xuất được tính khớp section chuẩn khi trùng hoặc là tiểu mục của nó (nhãn ghi tới cấp 1–3, kho chia theo section lá).
 - Ô bảng quá dài (cả đoạn văn trong một ô) được chia theo từ, mỗi phần lặp lại caption và tiêu đề.
+- **Tùy chọn cải thiện truy xuất (X2b, mặc định tắt):** `m3.rrf_weights` (RRF có trọng số; SPEC dùng RRF 1:1), `m3.rerank` (cross-encoder chấm lại `top_n` đơn vị đầu), `m3.visual_slots` (giữ ≥ n bảng/biểu đồ trong top-k). Lý do: trên 1.000 claim validation, hybrid 1:1 kém BM25 (Recall@5 75,8 so với 79,8; VisualComplete@5 66,2 so với 75,1) vì dense yếu (Recall@5 64,0). Chỉ chọn biến thể trên phần chỉnh của validation, xác nhận trên phần xác nhận (hyper_parameter.md mục 8).
+- **`max_parents` 3 → 5 (25/11/2026, tạm thời):** với 3 cha, chỉ 69% claim (291 claim G1, BM25) có đủ bảng chuẩn trong bằng chứng gửi cho model; parallel/sequential 44%/47% vì claim cần 2 bảng + đoạn văn. Với 5 cha: 80% (parallel 69%, sequential 65%), token bằng chứng TB 1.862 → 3.038, 18 claim chạm trần 6.000 token. Con số đo trên chính 291 claim dùng để quyết định, nên phải xác nhận trên phần xác nhận; chốt cuối cùng theo accuracy của verifier khi có GPU (chạy S-retr với 3 và 5). Biến thể `bm25-mp3` trong X2b giữ cấu hình cũ để so.
+- **`visual_slots.k` mặc định = `max_parents`:** bản đầu đặt k = 5 khi model chỉ nhận 3 cha, nên bảng được giữ chỗ ở hạng 4–5 bị cắt (top-5 tăng 81% → 90% nhưng đủ bảng khi đến model vẫn 69%). `evaluate` nay báo thêm "đủ bảng khi đến model" (`delivered/…`, đọc `selection/*.jsonl`).
+- **Bỏ rerank ms-marco khỏi X2b:** 66% đủ bảng khi đến model, kém BM25 (69%); model huấn luyện trên văn bản web, không đọc tốt bảng toàn số. Code `m3.rerank` vẫn giữ cho model khác.
 
 ## E0: Docling trên PDF arXiv
 

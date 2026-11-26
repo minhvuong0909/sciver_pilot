@@ -1,0 +1,16 @@
+# X2b: so các cách cải thiện truy xuất trên cùng kho (chỉ validation, hyper_parameter.md mục 8).
+# Chạy: python -m sciverx retrieve --config configs/experiments/x2b_retrieval_variants.yaml
+#       python -m sciverx evaluate --config configs/experiments/x2b_retrieval_variants.yaml
+# Chỉ số chính: "đủ bảng khi đến model" (delivered/..., compare-delivered/...), đo trên
+# selection/*.jsonl tức thứ model thật sự nhận, không phải top-k của danh sách xếp hạng.
+# Tên biến thể không chứa "_" (dùng "-"). visual_slots.k bỏ trống = max_parents của biến thể.
+# Rerank ms-marco đã bỏ: lượt chạy 25/11 cho 66% đủ bảng, kém BM25 69% (model huấn luyện trên văn bản web).
+base: ../base.yaml
+experiment: x2b_retrieval_variants
+m3:
+  variants:
+    - {name: bm25-mp3, method: bm25, budget: {max_parents: 3}}                       # cấu hình cũ
+    - {name: bm25-mp3-vs2, method: bm25, budget: {max_parents: 3}, visual_slots: {n: 2}}
+    - {name: bm25, method: bm25}                                                     # nền mới: max_parents 5
+    - {name: bm25-vs2, method: bm25, visual_slots: {n: 2}}
+    - {name: hybrid-w025, method: hybrid, rrf_weights: {bm25: 1.0, dense: 0.25}}

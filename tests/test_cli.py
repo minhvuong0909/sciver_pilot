@@ -36,7 +36,7 @@ def test_deep_merge_does_not_mutate():
 def test_every_stage_in_spec_is_registered():
     spec_stages = {"audit", "select", "sources", "gold", "extract", "normalize", "quality",
                    "cellmap", "units", "index", "retrieve", "align", "numeric", "package",
-                   "verify", "evaluate", "report", "annotate-export", "annotate-import"}
+                   "verify", "count-tokens", "b0-subset", "b0-import", "evaluate", "report", "annotate-export", "annotate-import"}
     assert set(cli.STAGES) == spec_stages
 
 

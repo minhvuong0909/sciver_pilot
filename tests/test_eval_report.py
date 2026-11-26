@@ -39,3 +39,42 @@ def test_evaluate_retrieval_dir(tmp_path):
     m = evaluate_retrieval_dir(tmp_path / "run", tmp_path / "gold.jsonl", paired={"c1"})
     assert m["G1_bm25"]["all"]["hit@1"] == round(2 / 3, 4) and m["G1_bm25"]["direct"]["n_claims"] == 3
     assert m["G1_bm25@PAIRED_RETR"]["all"]["n_claims"] == 1
+
+
+def test_evaluate_retrieval_dir_compares_variants_of_same_condition(tmp_path):
+    write_jsonl(tmp_path / "gold.jsonl", GOLDS.values())
+
+    def res(order):
+        return [RetrievalResult(claim_id=c, method="bm25", table_condition="G1", params={}, n_units_in_pool=3,
+                                n_parents_in_pool=2, pool_hash="h",
+                                candidates=[RetrievalCandidate(parent_id=p, best_unit_id="u", kind="x",
+                                                               final_rank=i + 1) for i, p in enumerate(order)])
+                for c in GOLDS]
+    write_jsonl(tmp_path / "run" / "retrieval" / "G1_bm25.jsonl", res(["section:4"]))
+    write_jsonl(tmp_path / "run" / "retrieval" / "G1_bm25-vs2.jsonl", res(["section:4", "table:1"]))
+    write_jsonl(tmp_path / "run" / "retrieval" / "E1_bm25.jsonl", res(["section:4"]))
+    m = evaluate_retrieval_dir(tmp_path / "run", tmp_path / "gold.jsonl", paper_of=PAPER)
+    cmp = m["compare/G1_bm25__vs__G1_bm25-vs2"]
+    assert cmp["n_claims"] == 3 and cmp["visual_complete@5"]["diff"] == round(2 / 3, 4)
+    assert "ci_low" in cmp["visual_complete@5"]
+    assert not any(k.startswith("compare/E1_bm25__vs__G1") for k in m)     # khác điều kiện bảng → không so
+    assert m["G1_bm25"]["ev:table_only"]["n_claims"] == 3
+
+
+def test_evaluate_reports_delivered_from_selection(tmp_path):
+    write_jsonl(tmp_path / "gold.jsonl", GOLDS.values())
+    res = [RetrievalResult(claim_id=c, method="bm25", table_condition="G1", params={}, n_units_in_pool=3,
+                           n_parents_in_pool=2, pool_hash="h",
+                           candidates=[RetrievalCandidate(parent_id=p, best_unit_id="u", kind="x", final_rank=i + 1)
+                                       for i, p in enumerate(["section:4", "table:1", "table:2"])]) for c in GOLDS]
+    for name, sent in (("bm25", ["section:4"]), ("bm25-vs2", ["section:4", "table:1", "table:2"])):
+        write_jsonl(tmp_path / "run" / "retrieval" / f"G1_{name}.jsonl", res)
+        write_jsonl(tmp_path / "run" / "selection" / f"G1_{name}.jsonl",
+                    [{"claim_id": c, "parents": [{"parent_id": p} for p in sent],
+                      "budget": {"tokens_used": 10 * len(sent)}} for c in GOLDS])
+    m = evaluate_retrieval_dir(tmp_path / "run", tmp_path / "gold.jsonl", paper_of=PAPER)
+    assert m["G1_bm25"]["all"]["visual_complete@5"] == 1.0        # xếp hạng có đủ bảng…
+    assert m["delivered/G1_bm25"]["all"]["delivered_visual_complete"] == 0.0   # …nhưng model không nhận
+    assert m["delivered/G1_bm25-vs2"]["all"]["delivered_visual_complete"] == 1.0
+    cmp = m["compare-delivered/G1_bm25__vs__G1_bm25-vs2"]["delivered_visual_complete"]
+    assert cmp["diff"] == 1.0 and cmp["b_only_better"] == 3

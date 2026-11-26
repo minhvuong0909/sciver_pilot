@@ -17,7 +17,7 @@ from sciverx.m3_retrieve.budget import select_evidence
 from sciverx.m3_retrieve.retrieve import retrieve
 from sciverx.schemas import ClaimInput, TableRecord
 from sciverx.utils.io import read_jsonl, write_jsonl
-from sciverx.utils.manifest import build_manifest, make_run_id, open_run_dir
+from sciverx.utils.manifest import build_manifest, find_or_make_run_id, open_run_dir
 
 
 def qwen_token_counter(model: str) -> Callable[[str], int]:  # pragma: no cover
@@ -26,15 +26,33 @@ def qwen_token_counter(model: str) -> Callable[[str], int]:  # pragma: no cover
     return lambda text: len(tok(text, add_special_tokens=False)["input_ids"])
 
 
+def variants_of(cfg_m3: dict) -> list[dict]:
+    """Các cách tìm cần chạy. `m3.variants` (nếu có) là danh sách
+    {name, method, rrf_weights?, rerank?, visual_slots?, budget?}; nếu không, mỗi phần tử của
+    `m3.methods` là một biến thể cùng tên. Kết quả ghi vào retrieval/{cond}_{name}.jsonl."""
+    if cfg_m3.get("variants"):
+        names = [v["name"] for v in cfg_m3["variants"]]
+        if len(names) != len(set(names)) or any("_" in n for n in names):
+            raise ValueError("Tên biến thể phải khác nhau và không chứa '_' (dùng '-')")
+        return list(cfg_m3["variants"])
+    return [{"name": m, "method": m} for m in cfg_m3["methods"]]
+
+
 def run_retrieval(cfg: dict, claims: list[ClaimInput], indexes: dict, tables: dict,
-                  cond: str, method: str, count, embedder=None) -> tuple[list, list]:
+                  cond: str, method: str, count, embedder=None, reranker=None,
+                  overrides: dict | None = None) -> tuple[list, list]:
     m3 = {**cfg["m3"], "embed_model": cfg["m1"]["units"]["embed_model"]}
+    for key in ("rrf_weights", "rerank", "visual_slots"):   # biến thể ghi đè cấu hình chung
+        if overrides and key in overrides:
+            m3[key] = overrides[key]
+    if overrides and overrides.get("budget"):                # vd {max_parents: 5}; trộn vào ngân sách chung
+        m3["budget"] = {**m3.get("budget", {}), **overrides["budget"]}
     allow_mixed = cfg.get("selection", {}).get("allow_mixed", False)
     results, selections = [], []
     qvecs = embedder.encode([c.text for c in claims]) if embedder is not None else None
     for i, c in enumerate(claims):
         idx = indexes[c.paper_id]
-        res = retrieve(c, idx, method, m3, qvecs[i] if qvecs is not None else None)
+        res = retrieve(c, idx, method, m3, qvecs[i] if qvecs is not None else None, reranker)
         sel = select_evidence(res, idx, tables.get(c.paper_id, {}), m3["budget"], count,
                               allow_mixed=allow_mixed)
         results.append(res)
@@ -47,15 +65,15 @@ def run(cfg: dict, args) -> int:  # pragma: no cover - cần model thật; logic
     claims = read_jsonl(work_dir(cfg) / "claims_input.jsonl", ClaimInput)
     if cfg.get("limit"):
         claims = claims[: cfg["limit"]]
-    methods = cfg["m3"]["methods"]
-    need_dense = any(m in ("dense", "hybrid") for m in methods)
+    variants = variants_of(cfg["m3"])
+    need_dense = any(v["method"] in ("dense", "hybrid") for v in variants)
     embedder = None
     if need_dense:
         from sciverx.m3_retrieve.rankers import SentenceTransformerEmbedder
         embedder = SentenceTransformerEmbedder(cfg["m1"]["units"]["embed_model"])
     count = qwen_token_counter(cfg["verifier"]["model"])
     exp = cfg.get("experiment", "x2_retrieval")
-    run_id = make_run_id(exp, cfg["split"], cfg)
+    run_id = find_or_make_run_id(cfg["paths"]["outputs"], exp, cfg["split"], cfg)
     run_dir = open_run_dir(cfg["paths"]["outputs"], build_manifest(run_id, cfg, [c.claim_id for c in claims]))
     for cond in ("G1", "E1"):
         if not tables_path(cfg, cond).exists():
@@ -64,11 +82,12 @@ def run(cfg: dict, args) -> int:  # pragma: no cover - cần model thật; logic
         for r in read_jsonl(tables_path(cfg, cond), TableRecord):
             tables.setdefault(r.paper_id, {})[r.table_id] = r
         indexes = load_indexes(cfg, cond, need_dense)
-        for method in methods:
+        for v in variants:
+            method = v["method"]
             res, sel = run_retrieval(cfg, claims, indexes, tables, cond, method, count,
-                                     embedder if method != "bm25" else None)
-            write_jsonl(Path(run_dir) / "retrieval" / f"{cond}_{method}.jsonl", res)
-            write_jsonl(Path(run_dir) / "selection" / f"{cond}_{method}.jsonl", sel)
-            print(f"[retrieve] {cond}/{method}: {len(res)} claim")
+                                     embedder if method != "bm25" else None, overrides=v)
+            write_jsonl(Path(run_dir) / "retrieval" / f"{cond}_{v['name']}.jsonl", res)
+            write_jsonl(Path(run_dir) / "selection" / f"{cond}_{v['name']}.jsonl", sel)
+            print(f"[retrieve] {cond}/{v['name']} ({method}): {len(res)} claim")
     print(f"[retrieve] → {run_dir}")
     return 0

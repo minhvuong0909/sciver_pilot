@@ -45,3 +45,51 @@ def test_evaluate_retrieval_groups_and_nan_text():
     assert out["all"]["n_claims"] == 2 and out["all"]["hit@1"] == 0.5
     assert out["direct"]["mrr"] == 1.0
     assert out["all"]["text_recall@10"] == 1.0  # v-2 không có section chuẩn nên bị bỏ khỏi trung bình
+
+
+def test_evidence_kind_groups():
+    from sciverx.evaluation.retrieval_metrics import evidence_kind
+    from sciverx.schemas import GoldInfo
+
+    def g(types):
+        return GoldInfo(claim_id="c", label=True, claim_type="direct", section_ids=[],
+                        visual_items=[{"item_id": str(i), "item_type": t, "image_path": ""}
+                                      for i, t in enumerate(types)])
+    assert evidence_kind(g(["table"])) == "table_only"
+    assert evidence_kind(g(["table", "table"])) == "table_only"
+    assert evidence_kind(g(["chart"])) == "chart_only"
+    assert evidence_kind(g(["table", "chart"])) == "table+chart"
+    assert evidence_kind(g([])) == "none"
+
+
+def test_compare_runs_paired_mcnemar_and_bootstrap():
+    from sciverx.evaluation.retrieval_metrics import compare_runs
+    a = {f"c{i}": {"hit@5": 1.0, "recall@5": 0.5, "visual_complete@5": 0.0} for i in range(10)}
+    b = {f"c{i}": {"hit@5": 1.0, "recall@5": 1.0, "visual_complete@5": 1.0 if i < 8 else 0.0}
+         for i in range(10)}
+    b["extra"] = {"hit@5": 1.0, "recall@5": 1.0, "visual_complete@5": 1.0}   # chỉ so trên phần giao
+    paper = {f"c{i}": f"p{i % 5}" for i in range(10)}
+    r = compare_runs(a, b, paper, n_boot=200)
+    assert r["n_claims"] == 10
+    vc = r["visual_complete@5"]
+    assert vc["diff"] == 0.8 and vc["b_only_better"] == 8 and vc["a_only_better"] == 0
+    assert vc["mcnemar_p"] < 0.01 and vc["ci_low"] > 0
+    assert r["recall@5"]["diff"] == 0.5 and "mcnemar_p" not in r["recall@5"]   # không phải 0/1
+    assert r["hit@5"]["diff"] == 0.0 and r["hit@5"]["mcnemar_p"] == 1.0
+
+
+def test_delivered_metrics_use_what_the_model_receives():
+    from sciverx.evaluation.retrieval_metrics import delivered_metrics, summarize_rows
+    from sciverx.schemas import GoldInfo
+    gold = GoldInfo(claim_id="c", label=True, claim_type="parallel", section_ids=["4"],
+                    visual_items=[{"item_id": "1", "item_type": "table", "image_path": ""},
+                                  {"item_id": "2", "item_type": "table", "image_path": ""}])
+    sel_one = {"claim_id": "c", "parents": [{"parent_id": "section:4.1"}, {"parent_id": "table:1"}],
+               "budget": {"tokens_used": 900, "truncated": False, "dropped_parents": []}}
+    sel_both = {"claim_id": "c", "parents": [{"parent_id": "table:2"}, {"parent_id": "table:1"}],
+                "budget": {"tokens_used": 1500, "truncated": True, "dropped_parents": ["section:4"]}}
+    a, b = delivered_metrics(sel_one, gold), delivered_metrics(sel_both, gold)
+    assert a["delivered_visual_complete"] == 0.0 and a["delivered_recall"] == 2 / 3   # tiểu mục 4.1 khớp section 4
+    assert b["delivered_visual_complete"] == 1.0 and b["truncated"] == 1.0 and b["dropped_for_budget"] == 1.0
+    s = summarize_rows({"x": a, "y": b}, {"x": "parallel", "y": "direct"})
+    assert s["all"]["delivered_visual_complete"] == 0.5 and s["parallel"]["n_claims"] == 1

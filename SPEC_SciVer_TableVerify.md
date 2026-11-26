@@ -405,7 +405,7 @@ Chỉ định nghĩa giao diện `extract_claims(draft_text) -> list[ClaimInput]
 - **Gộp theo cha:** điểm cha = điểm cao nhất của các đơn vị con; loại trùng trước khi xếp hạng. Năm nhóm hàng của một bảng chỉ chiếm **một** vị trí.
 - **Phạm vi chính:** kho của cùng bài. Kho nhiều bài là mở rộng.
 - **Ngân sách đầu vào cho verifier** (`budget.py`), chung cho BM25, dense và hybrid:
-  - `max_evidence_tokens` (đếm bằng tokenizer của Qwen, mặc định 6000), `max_parents` (mặc định 3), `max_images` = 2.
+  - `max_evidence_tokens` (đếm bằng tokenizer của Qwen, mặc định 6000), `max_parents` (mặc định 5; trước 25/11/2026 là 3, xem DEVIATIONS), `max_images` = 2.
   - Lấy cha theo thứ hạng cho tới khi chạm một trong các giới hạn. Một bảng cha vượt `max_evidence_tokens` riêng nó → đưa các nhóm hàng có điểm cao nhất kèm tiêu đề, ghi `truncated`.
   - Ghi `tokens_used`, `images_used`, `dropped_parents`. Báo phân bố token thực tế theo phương pháp, vì cùng `k` không có nghĩa là cùng số token.
 
@@ -613,7 +613,7 @@ m1:
   normalize: {format_dependent_terms: configs/format_terms.txt, include_bold: false}
   units: {max_wordpieces: 384, embed_model: sentence-transformers/all-mpnet-base-v2}
 m3: {methods: [bm25, dense, hybrid], bm25: {k1: 1.5, b: 0.75}, rrf_constant: 60, k_units: 50,
-     tokenizer_version: v1, budget: {max_evidence_tokens: 6000, max_parents: 3, max_images: 2}}
+     tokenizer_version: v1, budget: {max_evidence_tokens: 6000, max_parents: 5, max_images: 2}}
 m4: {model: Qwen/Qwen2.5-VL-7B-Instruct, temperature: 0, max_retries: 2, prompt_id: align_v1, max_align_tokens: 12000}
 m5: {calculator: false}
 verifier:
@@ -625,7 +625,7 @@ verifier:
 eval: {bootstrap_n: 1000, bootstrap_seed: 2026, bootstrap_unit: paper}
 ```
 - `run_id = {date}_{experiment}_{split}_{confighash[:8]}`. Không ghi đè. Có `manifest.json`. Chạy tiếp được khi bị ngắt, nếu hash cấu hình trùng.
-- CLI: `python -m sciverx <stage> --config configs/experiments/<x>.yaml`. Các stage: `audit`, `select`, `sources`, `gold`, `extract`, `normalize`, `quality`, `cellmap`, `units`, `index`, `retrieve`, `align`, `numeric`, `package`, `verify`, `evaluate`, `report`, `annotate-export`, `annotate-import`.
+- CLI: `python -m sciverx <stage> --config configs/experiments/<x>.yaml`. Các stage: `audit`, `select`, `sources`, `gold`, `extract`, `normalize`, `quality`, `cellmap`, `units`, `index`, `retrieve`, `align`, `numeric`, `package`, `verify`, `count-tokens` (đếm độ dài đầu vào verifier, không cần GPU), `b0-subset` / `b0-import` (chạy code SciVer gốc trên đúng tập claim và nhập kết quả), `evaluate`, `report`, `annotate-export`, `annotate-import`.
 - Các ngưỡng 6000 / 12000 token là giá trị khởi đầu: chỉnh trên validation sau khi xem phân bố token thật, rồi đóng băng ở B3.
 
 ---

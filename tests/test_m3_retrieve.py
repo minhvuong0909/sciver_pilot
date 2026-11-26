@@ -91,3 +91,122 @@ def test_retrieve_rejects_other_paper():
     idx = PaperIndex.build("p", "G1", UNITS)
     with pytest.raises(ValueError):
         retrieve(ClaimInput(claim_id="x", split="validation", paper_id="q", text="t"), idx, "bm25", {})
+
+
+# ------------------------------------------------------------------ cải thiện truy xuất (X2b)
+
+def test_weighted_rrf_downweights_weak_ranker():
+    rank = {"bm25": [0, 1], "dense": [1, 0]}
+    equal = rrf_fuse(rank, constant=60)
+    assert equal[0] == pytest.approx(equal[1])                 # 1:1 → hòa
+    w = rrf_fuse(rank, constant=60, weights={"bm25": 1.0, "dense": 0.5})
+    assert w[0] == pytest.approx(1 / 61 + 0.5 / 62) and w[0] > w[1]
+    assert rrf_fuse(rank, 60, {"dense": 0.0}) == {0: pytest.approx(1 / 61), 1: pytest.approx(1 / 62)}
+
+
+class FakeReranker:
+    name = "fake"
+
+    def __init__(self, prefer: str):
+        self.prefer = prefer
+        self.calls = []
+
+    def score(self, query, texts):
+        self.calls.append(list(texts))
+        return np.array([1.0 if self.prefer in t else 0.0 for t in texts])
+
+
+def _claim(text="Ours achieves 92.4 F1 on SQuAD."):
+    return ClaimInput(claim_id="validation-1", split="validation", paper_id="p", text=text)
+
+
+def test_rerank_reorders_parents_and_records_scores():
+    idx = PaperIndex.build("p", "G1", UNITS)
+    base = retrieve(_claim(), idx, "bm25", {})
+    rr = FakeReranker(prefer="Speed")                         # đẩy table:2 lên đầu
+    res = retrieve(_claim(), idx, "bm25", {"rerank": {"top_n": 10}}, reranker=rr)
+    assert res.candidates[0].parent_id == "table:2" != base.candidates[0].parent_id
+    assert res.candidates[0].rerank_rank == 1 and res.candidates[0].rerank_score == 1.0
+    assert [c.final_rank for c in res.candidates] == [1, 2, 3, 4]
+    assert sorted(c.parent_id for c in res.candidates) == sorted(c.parent_id for c in base.candidates)
+    assert res.params["rerank_model"] == "fake" and res.params["rerank_top_n"] == 10
+
+
+def test_rerank_top_n_limits_rescored_units():
+    idx = PaperIndex.build("p", "G1", UNITS)
+    rr = FakeReranker(prefer="Speed")
+    res = retrieve(_claim(), idx, "bm25", {"rerank": {"top_n": 2}}, reranker=rr)
+    assert len(rr.calls[0]) == 2                               # chỉ chấm lại 2 đơn vị đầu
+    assert len({c.parent_id for c in res.candidates}) == len(res.candidates) == 4
+    assert all(c.rerank_rank is None for c in res.candidates[2:] if c.rerank_score is None)
+
+
+def test_visual_slots_pull_tables_into_top_k():
+    from sciverx.m3_retrieve.rankers import ParentHit
+    from sciverx.m3_retrieve.retrieve import reserve_visual_slots
+    kinds = ["paragraph", "paragraph", "paragraph", "table_rows", "chart_caption"]
+    hits = [ParentHit(f"p{i}", i, 1.0 - i / 10, i + 1) for i in range(5)]
+    out = reserve_visual_slots(hits, kinds, k=3, n=2)
+    assert [h.parent for h in out] == ["p0", "p3", "p4", "p1", "p2"]
+    assert [h.rank for h in out] == [1, 2, 3, 4, 5]
+    assert reserve_visual_slots(hits, kinds, k=3, n=0) == hits
+    assert [h.parent for h in reserve_visual_slots(hits, kinds, k=5, n=2)] == [h.parent for h in hits]
+    assert [h.parent for h in reserve_visual_slots(hits, kinds, k=2, n=9)][:2] == ["p3", "p4"]  # n > k
+
+
+def test_retrieve_with_visual_slots_param_recorded():
+    idx = PaperIndex.build("p", "G1", UNITS)
+    res = retrieve(_claim("Intro question answering study"), idx, "bm25", {"visual_slots": {"k": 1, "n": 1}})
+    assert res.candidates[0].kind != "paragraph"
+    assert res.params["visual_slots"] == {"k": 1, "n": 1}
+
+
+def test_variants_of_defaults_and_validation():
+    from sciverx.m3_retrieve.stage import variants_of
+    assert variants_of({"methods": ["bm25", "hybrid"]}) == [{"name": "bm25", "method": "bm25"},
+                                                            {"name": "hybrid", "method": "hybrid"}]
+    v = [{"name": "bm25-vs2", "method": "bm25", "visual_slots": {"k": 5, "n": 2}}]
+    assert variants_of({"methods": ["bm25"], "variants": v}) == v
+    with pytest.raises(ValueError):
+        variants_of({"variants": [{"name": "a_b", "method": "bm25"}]})
+    with pytest.raises(ValueError):
+        variants_of({"variants": [{"name": "a", "method": "bm25"}, {"name": "a", "method": "dense"}]})
+
+
+def test_x2b_config_loads():
+    from pathlib import Path
+
+    from sciverx.config import load_config
+    from sciverx.m3_retrieve.stage import variants_of
+    cfg = load_config(Path(__file__).resolve().parents[1] / "configs/experiments/x2b_retrieval_variants.yaml")
+    names = [v["name"] for v in variants_of(cfg["m3"])]
+    assert "bm25" in names and "bm25-mp3" in names and not any("rerank" in n for n in names)
+    assert cfg["m3"]["rrf_constant"] == 60 and cfg["m3"]["budget"]["max_parents"] == 5
+
+
+def test_visual_slots_k_defaults_to_max_parents():
+    idx = PaperIndex.build("p", "G1", UNITS)
+    cfg = {"budget": {"max_parents": 1}, "visual_slots": {"n": 1}}
+    res = retrieve(_claim("Intro question answering study"), idx, "bm25", cfg)
+    assert res.candidates[0].kind != "paragraph"               # bảng nằm trong vùng model nhận
+    assert res.params["visual_slots"] == {"k": 1, "n": 1}
+    warn = retrieve(_claim(), idx, "bm25", {"budget": {"max_parents": 1}, "visual_slots": {"k": 3, "n": 1}})
+    assert "warning" in warn.params["visual_slots"]           # k > max_parents bị cảnh báo
+
+
+def test_variant_budget_override_merges(monkeypatch):
+    from sciverx.m3_retrieve import stage
+    seen = []
+
+    def fake_retrieve(c, idx, method, m3, qv, rr):
+        seen.append(m3["budget"])
+        return retrieve(c, idx, method, m3, qv, rr)
+    monkeypatch.setattr(stage, "retrieve", fake_retrieve)
+    monkeypatch.setattr(stage, "select_evidence", lambda *a, **k: __import__("types").SimpleNamespace(
+        parents=[], budget={}))
+    cfg = {"m3": {"budget": {"max_parents": 5, "max_evidence_tokens": 6000}},
+           "m1": {"units": {"embed_model": "x"}}}
+    stage.run_retrieval(cfg, [_claim()], {"p": PaperIndex.build("p", "G1", UNITS)}, {}, "G1", "bm25",
+                        len, overrides={"name": "bm25-mp3", "method": "bm25", "budget": {"max_parents": 3}})
+    assert seen == [{"max_parents": 3, "max_evidence_tokens": 6000}]
+    assert cfg["m3"]["budget"]["max_parents"] == 5            # cấu hình chung không bị sửa
