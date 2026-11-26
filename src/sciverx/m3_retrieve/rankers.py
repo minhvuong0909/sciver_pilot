@@ -56,14 +56,51 @@ def rank_order(scores: np.ndarray, k: int | None = None) -> list[int]:
     return order[:k] if k is not None else order
 
 
-def rrf_fuse(rankings: dict[str, list[int]], constant: int = 60) -> dict[int, float]:
-    """score(u) = Σ_m 1 / (constant + rank_m(u)), rank bắt đầu từ 1.
-    `constant` là hằng số RRF, không phải top-k."""
+def rrf_fuse(rankings: dict[str, list[int]], constant: int = 60,
+             weights: dict[str, float] | None = None) -> dict[int, float]:
+    """score(u) = Σ_m w_m / (constant + rank_m(u)), rank bắt đầu từ 1.
+    `constant` là hằng số RRF, không phải top-k. `weights` mặc định 1.0 cho mọi
+    phương pháp (RRF chuẩn); hạ trọng số của bên yếu (vd dense) để nó không đẩy
+    kết quả đúng của bên mạnh ra khỏi top-k."""
+    weights = weights or {}
     out: dict[int, float] = {}
-    for order in rankings.values():
+    for name, order in rankings.items():
+        w = float(weights.get(name, 1.0))
+        if w == 0:
+            continue
         for rank, idx in enumerate(order, 1):
-            out[idx] = out.get(idx, 0.0) + 1.0 / (constant + rank)
+            out[idx] = out.get(idx, 0.0) + w / (constant + rank)
     return out
+
+
+# ------------------------------------------------------------------ rerank
+
+class Reranker(Protocol):
+    name: str
+
+    def score(self, query: str, texts: Sequence[str]) -> np.ndarray:
+        """Điểm liên quan của từng văn bản với query (càng cao càng liên quan)."""
+
+
+class CrossEncoderReranker:  # pragma: no cover - cần sentence-transformers
+    def __init__(self, model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2", max_length: int = 512):
+        from sentence_transformers import CrossEncoder
+        self.model = CrossEncoder(model_name, max_length=max_length)
+        self.name = model_name
+
+    def score(self, query: str, texts: Sequence[str]) -> np.ndarray:
+        if not texts:
+            return np.zeros(0)
+        return np.asarray(self.model.predict([(query, t) for t in texts]), dtype=float)
+
+
+_RERANKERS: dict[str, Reranker] = {}
+
+
+def get_reranker(model_name: str) -> Reranker:  # pragma: no cover - nạp model thật
+    if model_name not in _RERANKERS:
+        _RERANKERS[model_name] = CrossEncoderReranker(model_name)
+    return _RERANKERS[model_name]
 
 
 @dataclass

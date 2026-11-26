@@ -51,6 +51,10 @@ Hash = 16 ký tự đầu SHA-256 của nội dung template (prompt `_text` gồ
 - Khóa cha có tiền tố (`section:1`, `table:1`) vì ID section và ID bảng trùng nhau trong một bài.
 - Section truy xuất được tính khớp section chuẩn khi trùng hoặc là tiểu mục của nó (nhãn ghi tới cấp 1–3, kho chia theo section lá).
 - Ô bảng quá dài (cả đoạn văn trong một ô) được chia theo từ, mỗi phần lặp lại caption và tiêu đề.
+- **Tùy chọn cải thiện truy xuất (X2b, mặc định tắt):** `m3.rrf_weights` (RRF có trọng số; SPEC dùng RRF 1:1), `m3.rerank` (cross-encoder chấm lại `top_n` đơn vị đầu), `m3.visual_slots` (giữ ≥ n bảng/biểu đồ trong top-k). Lý do: trên 1.000 claim validation, hybrid 1:1 kém BM25 (Recall@5 75,8 so với 79,8; VisualComplete@5 66,2 so với 75,1) vì dense yếu (Recall@5 64,0). Chỉ chọn biến thể trên phần chỉnh của validation, xác nhận trên phần xác nhận (hyper_parameter.md mục 8).
+- **`max_parents` 3 → 5 (25/11/2026, tạm thời):** với 3 cha, chỉ 69% claim (291 claim G1, BM25) có đủ bảng chuẩn trong bằng chứng gửi cho model; parallel/sequential 44%/47% vì claim cần 2 bảng + đoạn văn. Với 5 cha: 80% (parallel 69%, sequential 65%), token bằng chứng TB 1.862 → 3.038, 18 claim chạm trần 6.000 token. Con số đo trên chính 291 claim dùng để quyết định, nên phải xác nhận trên phần xác nhận; chốt cuối cùng theo accuracy của verifier khi có GPU (chạy S-retr với 3 và 5). Biến thể `bm25-mp3` trong X2b giữ cấu hình cũ để so.
+- **`visual_slots.k` mặc định = `max_parents`:** bản đầu đặt k = 5 khi model chỉ nhận 3 cha, nên bảng được giữ chỗ ở hạng 4–5 bị cắt (top-5 tăng 81% → 90% nhưng đủ bảng khi đến model vẫn 69%). `evaluate` nay báo thêm "đủ bảng khi đến model" (`delivered/…`, đọc `selection/*.jsonl`).
+- **Bỏ rerank ms-marco khỏi X2b:** 66% đủ bảng khi đến model, kém BM25 (69%); model huấn luyện trên văn bản web, không đọc tốt bảng toàn số. Code `m3.rerank` vẫn giữ cho model khác.
 
 ## E0: Docling trên PDF arXiv
 
