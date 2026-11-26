@@ -10,7 +10,7 @@ m1:
   normalize: {format_dependent_terms: configs/format_terms.txt, include_bold: false}
   units: {max_wordpieces: 384, embed_model: sentence-transformers/all-mpnet-base-v2}
 m3: {methods: [bm25, dense, hybrid], bm25: {k1: 1.5, b: 0.75}, rrf_constant: 60, k_units: 50,
-     tokenizer_version: v1, budget: {max_evidence_tokens: 6000, max_parents: 3, max_images: 2}}
+     tokenizer_version: v1, budget: {max_evidence_tokens: 6000, max_parents: 5, max_images: 2}}
 m4: {model: Qwen/Qwen2.5-VL-7B-Instruct, temperature: 0, max_retries: 2, prompt_id: align_v1, max_align_tokens: 12000}
 m5: {calculator: false}
 verifier:

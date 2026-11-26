@@ -56,6 +56,43 @@ def evidence_kind(gold: GoldInfo) -> str:
     return "table+chart" if has_t and has_c else ("table_only" if has_t else "chart_only")
 
 
+def delivered_metrics(selection: dict, gold: GoldInfo) -> dict[str, float]:
+    """Chỉ số trên thứ model THẬT SỰ nhận (selection/*.jsonl sau ngân sách M3), không
+    phải danh sách xếp hạng. Bảng bị cắt hàng vẫn tính là đã đưa (cắt được ghi riêng).
+    - delivered_visual_complete: 1 nếu mọi bảng/biểu đồ chuẩn có trong bằng chứng gửi đi
+    - delivered_recall: tỷ lệ bằng chứng chuẩn (bảng, biểu đồ, section) có trong đó"""
+    sent = [p["parent_id"] for p in selection.get("parents", [])]
+    visual = gold_visual_parents(gold)
+    all_gold = visual + gold_section_parents(gold)
+    budget = selection.get("budget", {})
+    return {
+        "delivered_visual_complete": float(all(_hit(g, sent) for g in visual)) if visual else 0.0,
+        "delivered_recall": sum(_hit(g, sent) for g in all_gold) / len(all_gold) if all_gold else 0.0,
+        "n_parents_sent": float(len(sent)),
+        "evidence_tokens": float(budget.get("tokens_used", 0)),
+        "truncated": float(bool(budget.get("truncated"))),
+        "dropped_for_budget": float(bool(budget.get("dropped_parents"))),
+    }
+
+
+def per_claim_delivered(selections: list[dict], golds: dict[str, GoldInfo]) -> dict[str, dict]:
+    return {s["claim_id"]: delivered_metrics(s, golds[s["claim_id"]]) for s in selections}
+
+
+def summarize_rows(per: dict[str, dict], group_by: dict[str, str] | None = None) -> dict[str, dict]:
+    """Trung bình theo claim, nhóm 'all' và (tùy chọn) theo group_by."""
+    groups: dict[str, list[dict]] = defaultdict(list)
+    for cid, m in per.items():
+        groups["all"].append(m)
+        if group_by:
+            groups[group_by[cid]].append(m)
+    out = {}
+    for g, rows in groups.items():
+        out[g] = {k: round(mean(r[k] for r in rows), 4) for k in rows[0]}
+        out[g]["n_claims"] = len(rows)
+    return out
+
+
 def per_claim_metrics(results: list[RetrievalResult], golds: dict[str, GoldInfo], ks=KS) -> dict[str, dict]:
     return {r.claim_id: claim_metrics([c.parent_id for c in r.candidates], golds[r.claim_id], ks)
             for r in results}

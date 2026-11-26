@@ -92,7 +92,8 @@ def retrieve(claim: ClaimInput, index: PaperIndex, method: str, cfg_m3: dict,
     """cfg_m3 (ngoài k_units, rrf_constant, bm25):
     - rrf_weights: {bm25: 1.0, dense: 0.5} — RRF có trọng số cho hybrid (mặc định 1.0 / 1.0);
     - rerank: {model: <cross-encoder>, top_n: 30} — chấm lại top_n đơn vị (mặc định tắt);
-    - visual_slots: {k: 5, n: 2} — giữ ít nhất n bảng/biểu đồ trong top-k (mặc định tắt)."""
+    - visual_slots: {n: 2, k?} — giữ ít nhất n bảng/biểu đồ trong top-k (mặc định tắt);
+      k bỏ trống = budget.max_parents, tức đúng số cha model sẽ nhận."""
     if claim.paper_id != index.paper_id:
         raise ValueError("Kho phải là của cùng bài với claim")
     k = cfg_m3.get("k_units", 50)
@@ -133,7 +134,9 @@ def retrieve(claim: ClaimInput, index: PaperIndex, method: str, cfg_m3: dict,
                                         int(rr_cfg.get("top_n", 30)))
     else:
         hits = list(fused.values())
-    hits = reserve_visual_slots(hits, [u.kind for u in index.units], int(vs.get("k", 0)), int(vs.get("n", 0)))
+    # k mặc định = max_parents: giữ chỗ đúng trong vùng mà bước chọn bằng chứng sẽ đưa cho model
+    vs_k = int(vs.get("k") or cfg_m3.get("budget", {}).get("max_parents", 0))
+    hits = reserve_visual_slots(hits, [u.kind for u in index.units], vs_k, int(vs.get("n", 0)))
 
     cands = []
     for hit in hits:
@@ -157,7 +160,9 @@ def retrieve(claim: ClaimInput, index: PaperIndex, method: str, cfg_m3: dict,
         params["rerank_model"] = getattr(reranker, "name", None)
         params["rerank_top_n"] = int(rr_cfg.get("top_n", 30))
     if vs.get("n"):
-        params["visual_slots"] = {"k": int(vs.get("k", 0)), "n": int(vs["n"])}
+        params["visual_slots"] = {"k": vs_k, "n": int(vs["n"])}
+        if vs.get("k") and cfg_m3.get("budget", {}).get("max_parents") and vs_k > cfg_m3["budget"]["max_parents"]:
+            params["visual_slots"]["warning"] = "k > max_parents: bảng được giữ chỗ có thể không đến model"
     return RetrievalResult(
         claim_id=claim.claim_id, method=method, table_condition=index.condition,
         params=params,

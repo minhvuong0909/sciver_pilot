@@ -180,4 +180,33 @@ def test_x2b_config_loads():
     from sciverx.m3_retrieve.stage import variants_of
     cfg = load_config(Path(__file__).resolve().parents[1] / "configs/experiments/x2b_retrieval_variants.yaml")
     names = [v["name"] for v in variants_of(cfg["m3"])]
-    assert "bm25" in names and "bm25-rerank-vs2" in names and cfg["m3"]["rrf_constant"] == 60
+    assert "bm25" in names and "bm25-mp3" in names and not any("rerank" in n for n in names)
+    assert cfg["m3"]["rrf_constant"] == 60 and cfg["m3"]["budget"]["max_parents"] == 5
+
+
+def test_visual_slots_k_defaults_to_max_parents():
+    idx = PaperIndex.build("p", "G1", UNITS)
+    cfg = {"budget": {"max_parents": 1}, "visual_slots": {"n": 1}}
+    res = retrieve(_claim("Intro question answering study"), idx, "bm25", cfg)
+    assert res.candidates[0].kind != "paragraph"               # bảng nằm trong vùng model nhận
+    assert res.params["visual_slots"] == {"k": 1, "n": 1}
+    warn = retrieve(_claim(), idx, "bm25", {"budget": {"max_parents": 1}, "visual_slots": {"k": 3, "n": 1}})
+    assert "warning" in warn.params["visual_slots"]           # k > max_parents bị cảnh báo
+
+
+def test_variant_budget_override_merges(monkeypatch):
+    from sciverx.m3_retrieve import stage
+    seen = []
+
+    def fake_retrieve(c, idx, method, m3, qv, rr):
+        seen.append(m3["budget"])
+        return retrieve(c, idx, method, m3, qv, rr)
+    monkeypatch.setattr(stage, "retrieve", fake_retrieve)
+    monkeypatch.setattr(stage, "select_evidence", lambda *a, **k: __import__("types").SimpleNamespace(
+        parents=[], budget={}))
+    cfg = {"m3": {"budget": {"max_parents": 5, "max_evidence_tokens": 6000}},
+           "m1": {"units": {"embed_model": "x"}}}
+    stage.run_retrieval(cfg, [_claim()], {"p": PaperIndex.build("p", "G1", UNITS)}, {}, "G1", "bm25",
+                        len, overrides={"name": "bm25-mp3", "method": "bm25", "budget": {"max_parents": 3}})
+    assert seen == [{"max_parents": 3, "max_evidence_tokens": 6000}]
+    assert cfg["m3"]["budget"]["max_parents"] == 5            # cấu hình chung không bị sửa

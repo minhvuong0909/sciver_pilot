@@ -28,7 +28,7 @@ def qwen_token_counter(model: str) -> Callable[[str], int]:  # pragma: no cover
 
 def variants_of(cfg_m3: dict) -> list[dict]:
     """Các cách tìm cần chạy. `m3.variants` (nếu có) là danh sách
-    {name, method, rrf_weights?, rerank?, visual_slots?}; nếu không, mỗi phần tử của
+    {name, method, rrf_weights?, rerank?, visual_slots?, budget?}; nếu không, mỗi phần tử của
     `m3.methods` là một biến thể cùng tên. Kết quả ghi vào retrieval/{cond}_{name}.jsonl."""
     if cfg_m3.get("variants"):
         names = [v["name"] for v in cfg_m3["variants"]]
@@ -45,6 +45,8 @@ def run_retrieval(cfg: dict, claims: list[ClaimInput], indexes: dict, tables: di
     for key in ("rrf_weights", "rerank", "visual_slots"):   # biến thể ghi đè cấu hình chung
         if overrides and key in overrides:
             m3[key] = overrides[key]
+    if overrides and overrides.get("budget"):                # vd {max_parents: 5}; trộn vào ngân sách chung
+        m3["budget"] = {**m3.get("budget", {}), **overrides["budget"]}
     allow_mixed = cfg.get("selection", {}).get("allow_mixed", False)
     results, selections = [], []
     qvecs = embedder.encode([c.text for c in claims]) if embedder is not None else None
