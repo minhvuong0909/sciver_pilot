@@ -17,13 +17,14 @@ from sciverx.evaluation.retrieval_metrics import (compare_runs, evaluate_retriev
 from sciverx.m1_prepare import work_dir
 from sciverx.schemas import RetrievalResult
 from sciverx.utils.io import read_jsonl
-from sciverx.utils.manifest import make_run_id
+from sciverx.utils.manifest import find_or_make_run_id
 
 
 def run_dir_of(cfg: dict) -> Path:
     if cfg.get("eval", {}).get("run_dir"):
         return Path(cfg["eval"]["run_dir"])
-    return Path(cfg["paths"]["outputs"]) / make_run_id(cfg.get("experiment", "x2_retrieval"), cfg["split"], cfg)
+    out = cfg["paths"]["outputs"]
+    return Path(out) / find_or_make_run_id(out, cfg.get("experiment", "x2_retrieval"), cfg["split"], cfg)
 
 
 def evaluate_retrieval_dir(run_dir: Path, gold_path: Path, paired: set[str] | None = None,
@@ -117,6 +118,24 @@ def run_evaluate(cfg: dict, args) -> int:
     return 0
 
 
-def run_report(cfg: dict, args) -> int:  # pragma: no cover - gom bảng ở GĐ B
-    print("[report] chưa làm: tổng hợp báo cáo Mức B (bảng chỉ số, CI, McNemar)")
-    return 3
+def run_report(cfg: dict, args) -> int:
+    """So kết luận của verifier giữa các điều kiện trong lượt chạy (vd B0, IMG, G1).
+    Ghi eval/verdict_report.json và eval/verdict_report.md."""
+    from sciverx.evaluation.verdict_report import build_report, to_markdown
+    from sciverx.schemas import ClaimInput
+    rd = run_dir_of(cfg)
+    if not list(rd.glob("*/verifier_outputs.jsonl")):
+        print(f"[report] chưa có verifier_outputs.jsonl trong {rd}")
+        return 2
+    golds = load_gold(work_dir(cfg) / "gold.jsonl")
+    paper_of = {c.claim_id: c.paper_id for c in read_jsonl(work_dir(cfg) / "claims_input.jsonl", ClaimInput)}
+    ev = cfg.get("eval", {})
+    rep = build_report(rd, golds, paper_of, ev.get("reference", "IMG"), ev.get("bootstrap_n", 1000))
+    out = rd / "eval"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "verdict_report.json").write_text(json.dumps(rep, ensure_ascii=False, indent=2), encoding="utf-8")
+    md = to_markdown(rep)
+    (out / "verdict_report.md").write_text(md, encoding="utf-8")
+    print(md)
+    print(f"[report] → {out / 'verdict_report.md'}")
+    return 0

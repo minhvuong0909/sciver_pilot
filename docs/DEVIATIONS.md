@@ -11,7 +11,12 @@ Mọi khác biệt so với code gốc SciVer và so với SPEC (SPEC 2.7, 14.1-
 | Đầu vào bảng | Chỉ ảnh | Thêm bảng văn bản G0/G1/E0/E1: khối `Table content (as text):` + chú thích bảng; prompt 1 và 3 đổi "image" → "table" theo `TEXT_MODE_EDITS` | RQ1 |
 | Prompt | 4 prompt theo `claim_type` | Giữ nguyên ở S-oracle; thêm `unified_v1` / `unified_v1_numeric` cho các thiết lập không biết loại claim | SPEC 8.3 |
 | Bằng chứng | Cho sẵn theo nhãn | Thêm S-retr, S-align4, S-align45 | RQ2, RQ3 |
-| `max_model_len` | Mặc định của vLLM | 32768 (giảm nếu GPU không đủ, ghi vào VERIFICATION_LOG) | SPEC 8.1 — **chưa thử trên GPU** |
+| `max_model_len` | Mặc định của vLLM | 32768 (giảm nếu GPU không đủ, ghi vào VERIFICATION_LOG) | SPEC 8.1 — **chưa thử trên GPU**. Kiểm trước bằng `python -m sciverx count-tokens --config …` |
+| `pred_old` với đầu ra rỗng | Mẫu rỗng sai ở cả hai nhãn (`if item["response"]`) | `pred_old("")` = `None` (tính sai), giống gốc | Trước đây pilot tính mẫu rỗng là đúng với nhãn Refuted |
+| Trạng thái đầu ra | Không có | `VerifierOutput.status` ∈ `ok` / `parse_error` / `empty` / `error`; báo tỷ lệ trong `condition_summary.status_pct` | Tách lỗi kỹ thuật, đầu ra rỗng và lỗi định dạng |
+| Retry | Không có (một lần gọi cả tập) | Lô lỗi → gửi lại từng request, tối đa `verifier.max_retries` (mặc định 1); số lần gọi ghi ở `attempts`, tổng retry ở manifest | Quy tắc cố định, áp dụng đều cho mọi cấu hình |
+| Cách gửi cho vLLM | `llm.generate` cả tập trong một lần, template dựng bằng `AutoProcessor` | `llm.chat` theo lô `verifier.chunk_size` (mặc định 64), mỗi request một `SamplingParams` có seed riêng | Nhanh như gửi cả tập nhưng ghi ra đĩa sau mỗi lô. [CẦN KIỂM trên GPU] so chuỗi prompt và vài đầu ra với cách gửi từng câu |
+| Chạy tiếp từ chỗ dừng | Không có (ngắt giữa chừng là mất cả điều kiện) | Chạy lại cùng lệnh (cùng `run_id`) bỏ qua (claim, lượt) đã có đầu ra không lỗi và cùng `request_hash`; mẫu `status=error` được chạy lại | Tránh tốn giờ GPU khi máy bị ngắt |
 
 ## Prompt và hash
 

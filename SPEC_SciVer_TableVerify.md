@@ -625,7 +625,7 @@ verifier:
 eval: {bootstrap_n: 1000, bootstrap_seed: 2026, bootstrap_unit: paper}
 ```
 - `run_id = {date}_{experiment}_{split}_{confighash[:8]}`. Không ghi đè. Có `manifest.json`. Chạy tiếp được khi bị ngắt, nếu hash cấu hình trùng.
-- CLI: `python -m sciverx <stage> --config configs/experiments/<x>.yaml`. Các stage: `audit`, `select`, `sources`, `gold`, `extract`, `normalize`, `quality`, `cellmap`, `units`, `index`, `retrieve`, `align`, `numeric`, `package`, `verify`, `evaluate`, `report`, `annotate-export`, `annotate-import`.
+- CLI: `python -m sciverx <stage> --config configs/experiments/<x>.yaml`. Các stage: `audit`, `select`, `sources`, `gold`, `extract`, `normalize`, `quality`, `cellmap`, `units`, `index`, `retrieve`, `align`, `numeric`, `package`, `verify`, `count-tokens` (đếm độ dài đầu vào verifier, không cần GPU), `b0-subset` / `b0-import` (chạy code SciVer gốc trên đúng tập claim và nhập kết quả), `evaluate`, `report`, `annotate-export`, `annotate-import`.
 - Các ngưỡng 6000 / 12000 token là giá trị khởi đầu: chỉnh trên validation sau khi xem phân bố token thật, rồi đóng băng ở B3.
 
 ---

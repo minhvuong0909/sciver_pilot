@@ -4,7 +4,7 @@ import pytest
 
 from sciverx.verifier import prompts as P
 from sciverx.verifier.request_hash import make_request, request_hash
-from sciverx.verifier.scoring import is_correct, pred_new, pred_old
+from sciverx.verifier.scoring import is_correct, pred_new, pred_old, verifier_status
 
 
 @pytest.mark.parametrize("resp,new", [
@@ -27,6 +27,25 @@ def test_pred_old_matches_original_rule():
     assert pred_old("Answer: no, the claim says yes") is True    # cách cũ: có "yes" ở đâu cũng tính
     assert pred_old("Answer: no") is False
     assert pred_old("eyes") is True                               # quirk của code gốc, giữ nguyên
+
+
+def test_pred_old_empty_response_is_wrong_like_original():
+    # acc_evaluation.py gốc: `if item["response"]` → đầu ra rỗng sai ở cả hai nhãn
+    assert pred_old("") is None
+    assert is_correct(pred_old(""), False) is False and is_correct(pred_old(""), True) is False
+    assert pred_old(" ") is False          # chuỗi khác rỗng vẫn qua điều kiện của code gốc
+
+
+@pytest.mark.parametrize("resp,err,status", [
+    ("Answer: yes", None, "ok"),
+    ("I cannot decide.", None, "parse_error"),
+    ("   \n", None, "empty"),
+    ("", None, "empty"),
+    ("", "OutOfMemoryError: CUDA", "error"),
+    ("Answer: yes", "Timeout", "error"),
+])
+def test_verifier_status(resp, err, status):
+    assert verifier_status(resp, err) == status
 
 
 def test_unreadable_counts_as_wrong():

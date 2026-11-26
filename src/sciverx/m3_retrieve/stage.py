@@ -17,7 +17,7 @@ from sciverx.m3_retrieve.budget import select_evidence
 from sciverx.m3_retrieve.retrieve import retrieve
 from sciverx.schemas import ClaimInput, TableRecord
 from sciverx.utils.io import read_jsonl, write_jsonl
-from sciverx.utils.manifest import build_manifest, make_run_id, open_run_dir
+from sciverx.utils.manifest import build_manifest, find_or_make_run_id, open_run_dir
 
 
 def qwen_token_counter(model: str) -> Callable[[str], int]:  # pragma: no cover
@@ -73,7 +73,7 @@ def run(cfg: dict, args) -> int:  # pragma: no cover - cần model thật; logic
         embedder = SentenceTransformerEmbedder(cfg["m1"]["units"]["embed_model"])
     count = qwen_token_counter(cfg["verifier"]["model"])
     exp = cfg.get("experiment", "x2_retrieval")
-    run_id = make_run_id(exp, cfg["split"], cfg)
+    run_id = find_or_make_run_id(cfg["paths"]["outputs"], exp, cfg["split"], cfg)
     run_dir = open_run_dir(cfg["paths"]["outputs"], build_manifest(run_id, cfg, [c.claim_id for c in claims]))
     for cond in ("G1", "E1"):
         if not tables_path(cfg, cond).exists():

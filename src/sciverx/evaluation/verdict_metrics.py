@@ -65,6 +65,11 @@ def condition_summary(outputs: list[VerifierOutput], golds: dict[str, GoldInfo],
         res["t0"] = accuracy_f1([per["t0"].get(c) for c in ids], labels)
     trunc = [o for o in outputs if o.finish_reason == "length"]
     res["truncated_pct"] = 100 * len(trunc) / len(outputs) if outputs else 0.0
+    # tách lỗi kỹ thuật / đầu ra rỗng / parse_error (hyper_parameter.md mục 9.2)
+    statuses = Counter(o.status for o in outputs)
+    res["status_pct"] = {k: 100 * statuses.get(k, 0) / len(outputs) if outputs else 0.0
+                         for k in ("ok", "parse_error", "empty", "error")}
+    res["retries"] = sum(o.attempts - 1 for o in outputs)
     return res
 
 
