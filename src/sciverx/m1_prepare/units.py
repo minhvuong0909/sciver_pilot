@@ -78,8 +78,18 @@ def _pieces(text: str, start: int, limit: int, count: Counter_, prefix: str,
     return [(start + a, start + b) for a, b in out]
 
 
+_REF_MARKER = re.compile(r"\s*###\w+###")   # dấu vết tiền xử lý của SciVer: "[7 ###reference_b7###]"
+
+
+def strip_ref_markers(text: str) -> str:
+    """Bỏ "###reference_xx###" (và các dấu ###...### khác) khỏi văn bản đơn vị.
+    Chỉ dùng cho kho tìm kiếm: context của S-oracle vẫn giữ nguyên văn như code SciVer."""
+    return _REF_MARKER.sub("", text)
+
+
 def paragraph_units(paper_id: str, paper: dict, limit: int, count: Counter_,
                     log: list[dict]) -> list[EvidenceUnit]:
+    """char_start/char_end trỏ vào section text GỐC (còn dấu ###...###); text đã bỏ dấu."""
     units = []
     for sec in paper.get("sections", []):
         text = sec.get("text") or ""
@@ -95,7 +105,7 @@ def paragraph_units(paper_id: str, paper: dict, limit: int, count: Counter_,
             if not block_s:
                 continue
             for a, b in _pieces(block_s, b_start + lead, limit, count, prefix, log, f"{paper_id}::{sid}"):
-                body = text[a:b]
+                body = strip_ref_markers(text[a:b])
                 units.append(EvidenceUnit(
                     unit_id=f"{paper_id}::paragraph::{sid}::{k}", paper_id=paper_id, kind="paragraph",
                     parent_id=sid, text=prefix + body, n_wordpieces=count(prefix + body),
